@@ -1,33 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, type ProductRecord } from "@/lib/api";
+import { useApiData } from "@/hooks/useApiData";
+import { type ProductRecord } from "@/lib/api";
 import type { Product } from "@/lib/data";
 
-let cached: Promise<ProductRecord[]> | null = null;
-
-function loadAll() {
-  if (!cached) {
-    cached = api<{ products: ProductRecord[] }>("/api/products")
-      .then((data) => data.products || [])
-      .catch(() => []);
-  }
-  return cached;
+/**
+ * Daftar produk live dari database (dipakai untuk menimpa mock data website).
+ * Di-cache via SWR sehingga navigasi berikutnya tampil instan.
+ */
+export function useLiveProducts(): ProductRecord[] {
+  const { data } = useApiData<{ products: ProductRecord[] }>("/api/products");
+  return data?.products ?? [];
 }
 
-/** Daftar produk live dari database (dipakai untuk menimpa mock data website). */
-export function useLiveProducts(): ProductRecord[] {
-  const [items, setItems] = useState<ProductRecord[]>([]);
-  useEffect(() => {
-    let active = true;
-    loadAll().then((list) => {
-      if (active) setItems(list);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-  return items;
+/** Sama seperti useLiveProducts, plus flag apakah data sudah terisi (untuk hindari kedip "tidak ditemukan"). */
+export function useLiveProductsState(): { products: ProductRecord[]; ready: boolean } {
+  const { data, isLoading } = useApiData<{ products: ProductRecord[] }>("/api/products");
+  return { products: data?.products ?? [], ready: Boolean(data) && !isLoading };
 }
 
 /** Ubah record produk dari database ke bentuk Product yang dikenali komponen UI. */

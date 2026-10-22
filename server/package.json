@@ -6,12 +6,23 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "seedseller": "node scripts/seed-jaya-store.js"
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "dbpush": "prisma db push",
+    "export:supabase": "node scripts/export-supabase.js",
+    "import:mysql": "node scripts/import-mysql.js",
+    "seed": "node scripts/import-mysql.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.115.0",
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
   }
 }

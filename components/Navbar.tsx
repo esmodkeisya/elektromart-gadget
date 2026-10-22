@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, type FormEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Search, MessageCircle, ShoppingCart, Menu, X, Globe, ChevronDown, UserCircle, LayoutGrid, User as UserIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { getAllProducts } from "@/lib/data";
+import { useLiveProducts } from "@/hooks/useLiveProducts";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useLanguage } from "@/lib/i18n";
 import { useCart } from "@/lib/CartContext";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
@@ -37,13 +40,14 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [userName, setUserName] = useState("");
-  const [userEmail, setUserEmail] = useState("");
-  const [userRole, setUserRole] = useState<"admin" | "seller" | "buyer" | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const pathname = usePathname();
+  const router = useRouter();
+  const liveProducts = useLiveProducts();
+  const { user, profile } = useCurrentUser();
   const { language, setLanguage, t } = useLanguage();
   const { itemCount } = useCart();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchError, setSearchError] = useState("");
   const navLinks = [
     { label: t("home"), href: "/beranda" },
     { label: t("categories"), href: "/kategori/semua" },
@@ -51,39 +55,49 @@ export default function Navbar() {
     { label: t("help"), href: "/bantuan" },
   ];
 
+  const userEmail = user?.email ?? "";
+  const userName = profile?.full_name || user?.user_metadata?.full_name || userEmail.split("@")[0] || "";
+  const avatarUrl = profile?.avatar_url ?? null;
+  const userRole = profile?.role === "admin" || profile?.role === "seller" || profile?.role === "buyer" ? profile.role : null;
+
   const isAdmin = userRole === "admin" || userEmail === "esmodkeisya@gmail.com";
   const accountHref =
     isAdmin ? "/admin/dashboard" : userRole === "seller" ? "/seller/dashboard" : "/profil";
   const accountLabel =
     userRole === "buyer" ? t("profile") : t("dashboard");
 
-  useEffect(() => {
-    let mounted = true;
-    async function loadUser() {
-      const { data } = await supabase.auth.getUser();
-      if (!mounted || !data.user) return;
-      const email = data.user.email ?? "";
-      setUserEmail(email);
-      setUserName(data.user.user_metadata?.full_name || email.split("@")[0] || t("profile"));
-      const { data: profile } = await supabase.from("profiles").select("avatar_url, full_name, role").eq("id", data.user.id).maybeSingle();
-      if (mounted) {
-        setAvatarUrl(profile?.avatar_url ?? null);
-        if (profile?.full_name) setUserName(profile.full_name);
-        setUserRole(profile?.role === "admin" || profile?.role === "seller" || profile?.role === "buyer" ? profile.role : null);
-      }
-    }
-    void loadUser();
-    const { data: listener } = supabase.auth.onAuthStateChange(() => void loadUser());
-    return () => { mounted = false; listener.subscription.unsubscribe(); };
-  }, [language, t]);
-
   async function logout() {
-    await supabase.auth.signOut();
     setProfileOpen(false);
-    setUserName("");
-    setUserEmail("");
-    setUserRole(null);
-    setAvatarUrl(null);
+    setMenuOpen(false);
+    await supabase.auth.signOut();
+  }
+
+  function handleSearch(event: FormEvent) {
+    event.preventDefault();
+    const term = searchQuery.trim().toLowerCase();
+    if (!term) return;
+
+    const liveMatch = liveProducts.find((product) =>
+      (product.name || "").toLowerCase().includes(term),
+    );
+    if (liveMatch) {
+      setSearchError("");
+      setMenuOpen(false);
+      router.push(`/produk/${liveMatch.id}`);
+      return;
+    }
+
+    const mockMatch = getAllProducts().find((product) =>
+      product.name.toLowerCase().includes(term),
+    );
+    if (mockMatch) {
+      setSearchError("");
+      setMenuOpen(false);
+      router.push(`/produk/${mockMatch.id}`);
+      return;
+    }
+
+    setSearchError(t("search.noResult"));
   }
 
   return (
@@ -109,14 +123,24 @@ export default function Navbar() {
           <span className="text-lg font-bold text-white">ElektroMart</span>
         </Link>
 
-        <div className="relative hidden flex-1 max-w-md md:block">
+        <form onSubmit={handleSearch} className="relative hidden flex-1 max-w-md md:block">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
+            value={searchQuery}
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+              if (searchError) setSearchError("");
+            }}
             placeholder={t("search")}
             className="w-full rounded-lg border-0 bg-white py-2.5 pl-9 pr-4 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-orange"
           />
-        </div>
+          {searchError && (
+            <p className="absolute left-0 top-full z-20 mt-2 w-full rounded-lg bg-white px-3 py-2 text-xs font-medium text-red-600 shadow-lg">
+              {searchError}
+            </p>
+          )}
+        </form>
 
         <nav className="hidden items-center gap-6 text-sm font-medium lg:flex">
           {navLinks.map((link) => (
@@ -185,14 +209,26 @@ export default function Navbar() {
       {/* Panel menu mobile: search bar + nav links + Masuk, muncul saat hamburger diklik */}
       {menuOpen && (
         <div className="border-t border-white/10 bg-navy-900 px-4 py-4 lg:hidden">
-          <div className="relative mb-4">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder={t("search")}
-              className="w-full rounded-lg border-0 bg-white py-2.5 pl-9 pr-4 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-orange"
-            />
-          </div>
+          <form onSubmit={handleSearch} className="mb-4">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  if (searchError) setSearchError("");
+                }}
+                placeholder={t("search")}
+                className="w-full rounded-lg border-0 bg-white py-2.5 pl-9 pr-4 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-orange"
+              />
+            </div>
+            {searchError && (
+              <p className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-medium text-red-600">
+                {searchError}
+              </p>
+            )}
+          </form>
           <nav className="flex flex-col gap-1 text-sm font-medium">
             {navLinks.map((link) => (
               <Link

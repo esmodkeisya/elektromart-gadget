@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Star, ChevronDown } from "lucide-react";
 import Navbar from "./Navbar";
@@ -16,7 +16,8 @@ import {
 } from "@/lib/data";
 import { slugify } from "@/lib/slugify";
 import { useLanguage } from "@/lib/i18n";
-import { api, type ProductRecord } from "@/lib/api";
+import { useApiData } from "@/hooks/useApiData";
+import { type ProductRecord } from "@/lib/api";
 
 
 function useAllProducts(): Product[] {
@@ -30,42 +31,40 @@ const ratingOptions = [4, 3, 2, 1];
 export default function KategoriPageClient({ slug }: { slug: string }) {
   const { t } = useLanguage();
   const catalogProducts = useAllProducts();
-  const [liveProducts, setLiveProducts] = useState<Product[]>([]);
-  const [catalogCategories, setCatalogCategories] = useState(categories);
   const normalizedSlug = decodeURIComponent(slug).trim().toLowerCase();
+  const { data: categoriesData } = useApiData<{ categories: { id: string; name: string; icon?: string | null }[] }>("/api/categories");
+  const { data: productsData } = useApiData<{ products: ProductRecord[] }>("/api/products?catalog=1");
 
-  useEffect(() => {
-    void api<{ categories: { id: string; name: string; icon?: string | null }[] }>("/api/categories")
-      .then(({ categories: databaseCategories }) => {
-        if (databaseCategories.length) {
-          setCatalogCategories(databaseCategories.map((category) => ({
-            id: category.id,
-            name: category.name,
-            icon: category.icon || "Smartphone",
-          })));
-        }
-      })
-      .catch(() => undefined);
+  const catalogCategories = useMemo(() => {
+    const databaseCategories = categoriesData?.categories;
+    if (databaseCategories?.length) {
+      return databaseCategories.map((category) => ({
+        id: category.id,
+        name: category.name,
+        icon: category.icon || "Smartphone",
+      }));
+    }
+    return categories;
+  }, [categoriesData]);
 
-    void api<{ products: ProductRecord[] }>("/api/products?catalog=1")
-      .then(({ products }) => {
-        setLiveProducts(products.filter((product) => product.status === "active").map((product) => ({
-          id: product.id,
-          name: product.name,
-          price: product.price,
-          image: product.image_url || product.images?.[0] || "/products/samsung-s24.svg",
-          images: product.images || undefined,
-          description: product.description || undefined,
-          stock: product.stock,
-          category: product.category || undefined,
-          rating: 0,
-          sold: 0,
-          location: "Indonesia",
-          store: { name: "ElektroMart Seller", location: "Indonesia", rating: 4.8, verified: true },
-        })));
-      })
-      .catch(() => setLiveProducts([]));
-  }, []);
+  const liveProducts = useMemo<Product[]>(() => {
+    return (productsData?.products || [])
+      .filter((product) => product.status === "active")
+      .map((product) => ({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        image: product.image_url || product.images?.[0] || "/products/samsung-s24.svg",
+        images: product.images || undefined,
+        description: product.description || undefined,
+        stock: product.stock,
+        category: product.category || undefined,
+        rating: 0,
+        sold: 0,
+        location: "Indonesia",
+        store: { name: "ElektroMart Seller", location: "Indonesia", rating: 4.8, verified: true },
+      }));
+  }, [productsData]);
 
   const allProducts = useMemo(
     () => uniqueProducts([...liveProducts, ...catalogProducts]),

@@ -23,6 +23,7 @@ import {
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { useCart } from "@/lib/CartContext";
+import { api } from "@/lib/api";
 import { formatRupiah } from "@/lib/data";
 import { useLanguage } from "@/lib/i18n";
 
@@ -251,6 +252,14 @@ export default function PaymentPage() {
   };
 
   const handlePaid = () => {
+    if (detail?.orderDbId) {
+      void api(`/api/orders/${detail.orderDbId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "paid" }),
+      }).catch(() => {
+        /* abaikan: status dapat disinkronkan seller */
+      });
+    }
     clearCart();
     setDeclared(true);
     router.push("/pembayaran/berhasil");

@@ -1,20 +1,11 @@
-const { supabase } = require("./supabase");
+const jwt = require("jsonwebtoken");
+const { prisma } = require("./prisma");
 
-async function requireUser(req, res, next) {
-  try {
-    const token = extractToken(req);
-    if (!token) return res.status(401).json({ error: "Sesi tidak ditemukan. Silakan login." });
+const SECRET = process.env.JWT_SECRET || "elektromart-local-dev-secret-change-me";
+const EXPIRES_IN = process.env.JWT_EXPIRES_IN || "30d";
 
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data.user) return res.status(401).json({ error: "Sesi tidak valid. Silakan login ulang." });
-
-    const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).maybeSingle();
-    req.user = data.user;
-    req.profile = profile;
-    next();
-  } catch (err) {
-    res.status(401).json({ error: err.message || "Autentikasi gagal." });
-  }
+function signToken(userId) {
+  return jwt.sign({ sub: userId }, SECRET, { expiresIn: EXPIRES_IN });
 }
 
 function extractToken(req) {
@@ -22,18 +13,48 @@ function extractToken(req) {
   return header.startsWith("Bearer ") ? header.slice(7) : "";
 }
 
+function publicUser(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    phone: user.phone || null,
+    user_metadata: user.user_metadata || {},
+    created_at: user.created_at,
+  };
+}
+
+async function loadContext(req, token) {
+  let payload;
+  try {
+    payload = jwt.verify(token, SECRET);
+  } catch {
+    return false;
+  }
+  const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+  if (!user) return false;
+  const profile = await prisma.profile.findUnique({ where: { id: user.id } });
+  req.user = publicUser(user);
+  req.profile = profile;
+  return true;
+}
+
+async function requireUser(req, res, next) {
+  try {
+    const token = extractToken(req);
+    if (!token) return res.status(401).json({ error: "Sesi tidak ditemukan. Silakan login." });
+    const ok = await loadContext(req, token);
+    if (!ok) return res.status(401).json({ error: "Sesi tidak valid. Silakan login ulang." });
+    next();
+  } catch (err) {
+    res.status(401).json({ error: err.message || "Autentikasi gagal." });
+  }
+}
+
 // Endpoint publik: tetap memuat req.user & req.profile bila ada token valid.
 async function optionalUser(req, res, next) {
   try {
     const token = extractToken(req);
-    if (token) {
-      const { data, error } = await supabase.auth.getUser(token);
-      if (!error && data.user) {
-        const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).maybeSingle();
-        req.user = data.user;
-        req.profile = profile;
-      }
-    }
+    if (token) await loadContext(req, token);
     next();
   } catch {
     next();
@@ -50,4 +71,4 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { requireUser, requireRole, optionalUser };
+module.exports = { signToken, requireUser, requireRole, optionalUser, publicUser, extractToken, SECRET };

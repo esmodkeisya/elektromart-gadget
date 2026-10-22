@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import Link from "next/link";
 import {
-  ArrowLeft,
   FileText,
   Loader2,
   MessageCircleMore,
@@ -77,7 +75,7 @@ function timeLabel(iso: string) {
   return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function ChatClient({ backHref = "/beranda", backLabel }: { backHref?: string; backLabel?: string }) {
+export default function ChatClient() {
   const { t } = useLanguage();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -99,14 +97,14 @@ export default function ChatClient({ backHref = "/beranda", backLabel }: { backH
   useEffect(() => {
     let mounted = true;
     async function bootstrap() {
-      const { data: userData } = await supabase.auth.getUser();
+      const { data: sessionData } = await supabase.auth.getSession();
       if (!mounted) return;
-      if (!userData.user) {
+      if (!sessionData.session?.user) {
         setError(t("profile.sessionNotFoundLogin"));
         setLoading(false);
         return;
       }
-      setMyId(userData.user.id);
+      setMyId(sessionData.session.user.id);
       const list = await refreshConversations();
       if (mounted) {
         const param = new URLSearchParams(window.location.search).get("conversation");
@@ -322,13 +320,6 @@ export default function ChatClient({ backHref = "/beranda", backLabel }: { backH
       {selected ? (
         <section className="flex min-h-0 flex-col bg-white">
           <header className="flex items-center gap-3 border-b border-slate-200 px-5 py-4 shadow-sm">
-            <Link
-              href={backHref}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {backLabel || t("chat.backHome")}
-            </Link>
             <div className="flex items-center gap-3">
               {selected.other.avatar_url ? (
                 <img src={selected.other.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />

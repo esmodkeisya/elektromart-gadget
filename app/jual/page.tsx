@@ -140,7 +140,7 @@ export default function JualPage() {
 
           <div className="mt-8 text-center">
             <Link
-              href="/bantuan-penjual"
+              href="/pusat-edukasi-seller"
               className="inline-flex items-center gap-2 rounded-xl bg-brand-blue px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700"
             >
               <BookOpen className="h-4 w-4" /> {t("jual.openEducation")}

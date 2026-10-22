@@ -30,12 +30,15 @@ import {
   applyLiveProduct,
   applyLiveProducts,
   recordToProduct,
-  useLiveProducts,
+  useLiveProductsState,
 } from "@/hooks/useLiveProducts";
 
 export default function ProductDetail({ productId }: { productId: string }) {
-  const live = useLiveProducts();
-  const [resolved, setResolved] = useState<Product | null>(null);
+  const { products: live, ready } = useLiveProductsState();
+  const [resolved, setResolved] = useState<Product | null>(() => {
+    const mock = getProductById(productId);
+    return mock ?? null;
+  });
 
   useEffect(() => {
     if (!productId) return;
@@ -80,6 +83,25 @@ export default function ProductDetail({ productId }: { productId: string }) {
   };
 
   if (!product) {
+    if (!ready) {
+      return (
+        <main>
+          <Navbar />
+          <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+            <div className="grid animate-pulse gap-8 lg:grid-cols-2">
+              <div className="aspect-square rounded-2xl bg-slate-200" />
+              <div className="space-y-4">
+                <div className="h-6 w-3/4 rounded bg-slate-200" />
+                <div className="h-5 w-1/3 rounded bg-slate-200" />
+                <div className="h-24 rounded bg-slate-200" />
+                <div className="h-12 w-48 rounded-xl bg-slate-200" />
+              </div>
+            </div>
+          </div>
+          <Footer />
+        </main>
+      );
+    }
     return (
       <main>
         <Navbar />

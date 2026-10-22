@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { Pencil, Star, Store, Trash2 } from "lucide-react";
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
 import { api, type UserProfile } from "@/lib/api";
+import { useApiData, mutateApi } from "@/hooks/useApiData";
 
 const emptyForm = {
   full_name: "",
@@ -33,7 +34,8 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function AdminSeller() {
   const { t } = useLanguage();
-  const [sellers, setSellers] = useState<UserProfile[]>([]);
+  const { data, error: loadError } = useApiData<{ users: UserProfile[] }>("/api/users?role=seller");
+  const sellers = data?.users ?? [];
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -41,18 +43,8 @@ export default function AdminSeller() {
   const [message, setMessage] = useState("");
 
   async function load() {
-    try {
-      const data = await api<{ users: UserProfile[] }>("/api/users?role=seller");
-      setSellers(data.users || []);
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("api.unavailable"));
-    }
+    await mutateApi("/api/users?role=seller");
   }
-
-  useEffect(() => {
-    void load();
-  }, []);
 
   function startCreate() {
     setEditingId(null);
@@ -126,7 +118,7 @@ export default function AdminSeller() {
           </button>
         </div>
         {message ? <p className="mb-4 text-sm text-emerald-600">{message}</p> : null}
-        {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
+        {error || loadError ? <p className="mb-4 text-sm text-red-600">{error || loadError?.message}</p> : null}
 
         {open ? (
           <form onSubmit={submit} className="mb-5 grid gap-3 rounded-2xl bg-white p-5 shadow-card sm:grid-cols-2">

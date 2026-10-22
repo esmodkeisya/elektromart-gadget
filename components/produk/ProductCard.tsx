@@ -7,10 +7,26 @@ import { Product, formatRupiah } from "@/lib/data";
 import { useLanguage } from "@/lib/i18n";
 import { applyLiveProduct, useLiveProducts } from "@/hooks/useLiveProducts";
 
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
 export function FlashSaleCard({ product }: { product: Product }) {
   const { t } = useLanguage();
   const live = useLiveProducts();
   const item = applyLiveProduct(product, live);
+  const discount =
+    item.discountPercent && item.discountPercent > 0
+      ? item.discountPercent
+      : 20 + (hashString(item.id) % 51);
+  const originalPrice =
+    item.originalPrice && item.originalPrice > item.price
+      ? item.originalPrice
+      : Math.round(item.price / (1 - discount / 100));
   const progress = item.soldOf
     ? Math.round(((item.sold ?? 0) / item.soldOf) * 100)
     : 0;
@@ -29,7 +45,7 @@ export function FlashSaleCard({ product }: { product: Product }) {
           className="object-cover"
         />
         <span className="absolute left-2 top-2 rounded bg-red-600 px-1.5 py-0.5 text-xs font-bold text-white">
-          -{item.discountPercent}%
+          -{discount}%
         </span>
         <span className="absolute right-2 top-2 rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-navy-900">
           {t("flashSaleTag")}
@@ -44,10 +60,8 @@ export function FlashSaleCard({ product }: { product: Product }) {
             {formatRupiah(item.price)}
           </p>
         </div>
-        {item.originalPrice && (
-          <p className="text-xs text-slate-400 line-through">
-            {formatRupiah(item.originalPrice)}
-          </p>
+        {originalPrice > item.price && (
+          <p className="text-xs text-slate-400 line-through">{formatRupiah(originalPrice)}</p>
         )}
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
           <div

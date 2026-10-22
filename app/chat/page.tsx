@@ -8,7 +8,7 @@ export default function ChatPage() {
     <main className="flex h-screen flex-col overflow-hidden bg-slate-100 text-slate-800">
       <Navbar />
       <div className="flex min-h-0 flex-1 flex-col">
-        <ChatClient backHref="/beranda" />
+        <ChatClient />
       </div>
 
       <style jsx global>{`

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LayoutGrid,
   Tags,
@@ -24,6 +24,7 @@ import {
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
 import { api } from "@/lib/api";
+import { useApiData, mutateApi } from "@/hooks/useApiData";
 import { formatRupiah } from "@/lib/data";
 
 type CategorySlice = { label: string; value: number; color: string };
@@ -39,6 +40,14 @@ type OrderStats = {
   revenueOrders: number;
 };
 type PaymentMethodStat = { name: string; count: number };
+type AdminDashboardResponse = {
+  stats: { sellers: number; buyers: number; products: number; categories: number };
+  categories: { name: string; color: string; product_count: number }[];
+  products: PopularProduct[];
+  sellers: TopSeller[];
+  orders?: OrderStats;
+  paymentMethods?: PaymentMethodStat[];
+};
 type ReportRecord = {
   id: string;
   product_id: string | null;
@@ -51,6 +60,16 @@ type ReportRecord = {
   status: "pending" | "resolved" | "dismissed";
   created_at: string;
   reporter: string | null;
+};
+
+const EMPTY_ORDERS: OrderStats = {
+  total: 0,
+  thisMonth: 0,
+  totalRevenue: 0,
+  commissionRevenue: 0,
+  escrowHeldFunds: 0,
+  totalPayoutToSellers: 0,
+  revenueOrders: 0,
 };
 
 const reportStatusStyles: Record<ReportRecord["status"], string> = {
@@ -97,57 +116,30 @@ function fromDeg(deg: number) {
 
 export default function DashboardPage() {
   const { t } = useLanguage();
-  const [stats, setStats] = useState({ sellers: 0, buyers: 0, products: 0, categories: 0 });
-  const [categorySales, setCategorySales] = useState<CategorySlice[]>([]);
-  const [popularProducts, setPopularProducts] = useState<PopularProduct[]>([]);
-  const [topSellers, setTopSellers] = useState<TopSeller[]>([]);
-  const [orders, setOrders] = useState<OrderStats>({
-    total: 0,
-    thisMonth: 0,
-    totalRevenue: 0,
-    commissionRevenue: 0,
-    escrowHeldFunds: 0,
-    totalPayoutToSellers: 0,
-    revenueOrders: 0,
-  });
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodStat[]>([]);
-  const [reports, setReports] = useState<ReportRecord[]>([]);
+  const { data, error: dashboardError } = useApiData<AdminDashboardResponse>("/api/dashboard/admin");
+  const { data: reportsData } = useApiData<{ reports: ReportRecord[] }>("/api/reports");
   const [busyReportId, setBusyReportId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    void api<{
-      stats: { sellers: number; buyers: number; products: number; categories: number };
-      categories: { name: string; color: string; product_count: number }[];
-      products: PopularProduct[];
-      sellers: TopSeller[];
-      orders?: OrderStats;
-      paymentMethods?: PaymentMethodStat[];
-    }>("/api/dashboard/admin")
-      .then((data) => {
-        setStats(data.stats);
-        const categorySales = (data.categories || []).map((category) => ({
-          label: category.name,
-          value: category.product_count || 0,
-          color: category.color || "#94a3b8",
-        }));
-        const categoryTotal = categorySales.reduce((sum, category) => sum + category.value, 0);
-        const unassignedProducts = Math.max(0, data.stats.products - categoryTotal);
-        const accessories = categorySales.find((category) => category.label.toLowerCase() === "aksesoris");
-        if (accessories && unassignedProducts > 0) accessories.value += unassignedProducts;
-        setCategorySales(categorySales);
-        setPopularProducts(data.products || []);
-        setTopSellers(data.sellers || []);
-        if (data.orders) setOrders(data.orders);
-        if (data.paymentMethods) setPaymentMethods(data.paymentMethods);
-        setError("");
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : t("api.unavailable")));
+  const stats = data?.stats ?? { sellers: 0, buyers: 0, products: 0, categories: 0 };
+  const orders = data?.orders ?? EMPTY_ORDERS;
+  const popularProducts = data?.products ?? [];
+  const topSellers = data?.sellers ?? [];
+  const paymentMethods = data?.paymentMethods ?? [];
+  const reports = reportsData?.reports ?? [];
 
-    void api<{ reports: ReportRecord[] }>("/api/reports")
-      .then((data) => setReports(data.reports || []))
-      .catch(() => {});
-  }, [t]);
+  const categorySales = useMemo<CategorySlice[]>(() => {
+    const sales = (data?.categories || []).map((category) => ({
+      label: category.name,
+      value: category.product_count || 0,
+      color: category.color || "#94a3b8",
+    }));
+    const total = sales.reduce((sum, category) => sum + category.value, 0);
+    const unassigned = Math.max(0, (data?.stats.products ?? 0) - total);
+    const accessories = sales.find((category) => category.label.toLowerCase() === "aksesoris");
+    if (accessories && unassigned > 0) accessories.value += unassigned;
+    return sales;
+  }, [data]);
 
   async function setReportStatus(id: string, status: ReportRecord["status"]) {
     setBusyReportId(id);
@@ -156,7 +148,7 @@ export default function DashboardPage() {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
-      setReports((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+      mutateApi("/api/reports");
     } catch (err) {
       setError(err instanceof Error ? err.message : t("api.unavailable"));
     } finally {
@@ -274,7 +266,9 @@ export default function DashboardPage() {
             />
           </div>
 
-          {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
+          {error || dashboardError ? (
+            <p className="mt-4 text-sm text-red-600">{error || dashboardError?.message}</p>
+          ) : null}
 
           {/* ====== STAT CARDS — Baris 2 ====== */}
           <div className="mt-4 grid grid-cols-2 gap-4">

@@ -41,10 +41,10 @@ const langkahLacak = [
 ];
 
 const quickHelp = [
-  { icon: MessageCircle, labelKey: "faq", href: "/bantuan#faq" },
-  { icon: FileText, labelKey: "syaratKetentuan", href: "/bantuan#syarat-ketentuan" },
-  { icon: Lock, labelKey: "kebijakanPrivasi", href: "/bantuan#kebijakan-privasi" },
-  { icon: LifeBuoy, labelKey: "hubungiCS", href: "/bantuan#hubungi-cs" },
+  { icon: MessageCircle, labelKey: "faq", href: "/faq" },
+  { icon: FileText, labelKey: "syaratKetentuan", href: "/syarat-ketentuan" },
+  { icon: Lock, labelKey: "kebijakanPrivasi", href: "/kebijakan-privasi" },
+  { icon: LifeBuoy, labelKey: "hubungiCS", href: "/hubungi-cs" },
 ];
 
 export default function BeliPage() {

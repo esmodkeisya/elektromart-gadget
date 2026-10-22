@@ -49,6 +49,9 @@ export default function LoginPage() {
     }
 
     setForgotMessage(t("auth.resetLinkSent"));
+    window.setTimeout(() => {
+      router.push(`/reset-password?email=${encodeURIComponent(email)}`);
+    }, 800);
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {

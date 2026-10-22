@@ -6,43 +6,34 @@ import AdminAvatar from "../components/AdminAvatar";
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
+import { useApiData, mutateApi } from "@/hooks/useApiData";
 
 type Profile = { full_name: string; phone: string; job_title: string; avatar_url: string | null };
 const emptyProfile: Profile = { full_name: "", phone: "", job_title: "Administrator", avatar_url: null };
 
 export default function AdminProfil() {
   const { t } = useLanguage();
+  const { data: sessionData, error: sessionError } = useApiData<{ user: { id: string; email?: string } | null }>("/api/auth/user");
+  const userId = sessionData?.user?.id ?? null;
+  const { data: profileRes, error: profileError } = useApiData<{ data: (Partial<Profile> & { id?: string }) | null }>(
+    userId ? `/api/profiles?id=${userId}` : null
+  );
+
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    async function loadProfile() {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        setError(t("admin.sessionNotFoundLogin"));
-        setLoading(false);
-        return;
-      }
+    if (!sessionData) return;
+    setEmail(sessionData.user?.email ?? "");
+    if (profileRes?.data) setProfile({ ...emptyProfile, ...profileRes.data });
+  }, [sessionData, profileRes]);
 
-      setEmail(userData.user.email ?? "");
-      const { data, error: profileError } = await supabase
-        .from("profiles")
-        .select("full_name, phone, job_title, avatar_url")
-        .eq("id", userData.user.id)
-        .maybeSingle();
-      if (profileError) setError(profileError.message);
-      if (data) setProfile({ ...emptyProfile, ...data });
-      setLoading(false);
-    }
-
-    void loadProfile();
-  }, []);
+  const loading = !sessionData && !sessionError;
 
   function updateField(field: keyof Profile, value: string) {
     setProfile((current) => ({ ...current, [field]: value }));
@@ -73,7 +64,10 @@ export default function AdminProfil() {
       : { error: null };
     setSaving(false);
     if (saveError || emailError) setError((saveError ?? emailError)?.message ?? t("admin.profileSaveFailed"));
-    else setMessage(t("admin.profileSaved"));
+    else {
+      setMessage(t("admin.profileSaved"));
+      if (userId) mutateApi(`/api/profiles?id=${userId}`);
+    }
   }
 
   async function changePhoto(event: ChangeEvent<HTMLInputElement>) {
@@ -110,6 +104,7 @@ export default function AdminProfil() {
     else {
       setProfile((current) => ({ ...current, avatar_url: data.publicUrl }));
       setMessage(t("admin.photoUpdated"));
+      if (userId) mutateApi(`/api/profiles?id=${userId}`);
     }
     event.target.value = "";
   }
@@ -124,6 +119,7 @@ export default function AdminProfil() {
     else {
       setProfile((current) => ({ ...current, avatar_url: null }));
       setMessage(t("admin.photoDeleted"));
+      if (userId) mutateApi(`/api/profiles?id=${userId}`);
     }
   }
 
@@ -148,7 +144,7 @@ export default function AdminProfil() {
         <h1 className="text-[28px] font-bold tracking-tight text-admin-ink">{t("admin.adminProfile")}</h1>
         <p className="mt-1 text-sm text-admin-muted">{t("admin.profileSubtitle")}</p>
         {message ? <p className="mt-4 rounded-lg bg-[#E9F8EF] px-4 py-3 text-sm text-[#15803D]">{message}</p> : null}
-        {error ? <p className="mt-4 rounded-lg bg-[#FEF2F2] px-4 py-3 text-sm text-[#B91C1C]">{error}</p> : null}
+        {error || profileError ? <p className="mt-4 rounded-lg bg-[#FEF2F2] px-4 py-3 text-sm text-[#B91C1C]">{error || profileError?.message}</p> : null}
 
         <div className="mt-6 rounded-2xl bg-white p-6 shadow-card">
           {loading ? <p className="text-sm text-admin-muted">{t("admin.loadingProfile")}</p> : (

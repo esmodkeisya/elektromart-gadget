@@ -20,6 +20,8 @@ import {
   LifeBuoy,
 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
+import { useHelpPage } from "@/hooks/useHelpPage";
+import { tr } from "@/lib/helpPages";
 
 // Menu navigasi cepat, sesuai 4 link di footer "BANTUAN"
 const menuBantuan = [
@@ -39,37 +41,15 @@ const panduanAwal = [
   { icon: ShieldCheck, titleKey: "help.step5Title", descKey: "help.step5Desc" },
 ];
 
-// Data FAQ
-const faq = [
-  { qKey: "help.faq1Q", aKey: "help.faq1A" },
-  { qKey: "help.faq2Q", aKey: "help.faq2A" },
-  { qKey: "help.faq3Q", aKey: "help.faq3A" },
-  { qKey: "help.faq4Q", aKey: "help.faq4A" },
-  { qKey: "help.faq5Q", aKey: "help.faq5A" },
-  { qKey: "help.faq6Q", aKey: "help.faq6A" },
-];
-
-// Data Syarat & Ketentuan
-const syaratKetentuan = [
-  { titleKey: "help.tos1Title", descKey: "help.tos1Desc" },
-  { titleKey: "help.tos2Title", descKey: "help.tos2Desc" },
-  { titleKey: "help.tos3Title", descKey: "help.tos3Desc" },
-  { titleKey: "help.tos4Title", descKey: "help.tos4Desc" },
-  { titleKey: "help.tos5Title", descKey: "help.tos5Desc" },
-  { titleKey: "help.tos6Title", descKey: "help.tos6Desc" },
-];
-
-// Data Kebijakan Privasi
-const kebijakanPrivasi = [
-  { titleKey: "help.privacy1Title", descKey: "help.privacy1Desc" },
-  { titleKey: "help.privacy2Title", descKey: "help.privacy2Desc" },
-  { titleKey: "help.privacy3Title", descKey: "help.privacy3Desc" },
-  { titleKey: "help.privacy4Title", descKey: "help.privacy4Desc" },
-  { titleKey: "help.privacy5Title", descKey: "help.privacy5Desc" },
-];
+const contactIcons = [MessageCircle, Mail, Phone];
 
 export default function BantuanPage() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const { data: faqData } = useHelpPage("faq");
+  const { data: tosData } = useHelpPage("syarat-ketentuan");
+  const { data: privacyData } = useHelpPage("kebijakan-privasi");
+  const { data: contactData } = useHelpPage("hubungi-cs");
+  const contactChannels = contactData.items.slice(0, 3);
   return (
     <div className="min-h-screen bg-white">
       <Navbar />
@@ -144,16 +124,16 @@ export default function BantuanPage() {
           </div>
 
           <div className="mt-8 space-y-3">
-            {faq.map((item, idx) => (
+            {faqData.items.map((item, idx) => (
               <details
                 key={idx}
                 className="group rounded-2xl border border-slate-100 bg-white px-5 py-4 transition-colors open:border-slate-200 hover:border-slate-200"
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-semibold text-navy-900">
-                  {t(item.qKey)}
+                  {tr(item.heading, language)}
                   <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition-transform duration-300 group-open:rotate-180" />
                 </summary>
-                <p className="mt-3 text-sm leading-relaxed text-slate-500">{t(item.aKey)}</p>
+                <p className="mt-3 text-sm leading-relaxed text-slate-500">{tr(item.body, language)}</p>
               </details>
             ))}
           </div>
@@ -169,15 +149,15 @@ export default function BantuanPage() {
           </div>
 
           <div className="mt-8 space-y-3">
-            {syaratKetentuan.map((item, idx) => (
+            {tosData.items.map((item, idx) => (
               <div key={idx} className="rounded-2xl border border-slate-100 bg-white p-5">
                 <div className="flex items-start gap-3">
                   <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-navy-900/5 text-[10px] font-bold text-navy-900">
                     {idx + 1}
                   </span>
                   <div>
-                    <h3 className="text-sm font-semibold text-navy-900">{t(item.titleKey)}</h3>
-                    <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{t(item.descKey)}</p>
+                    <h3 className="text-sm font-semibold text-navy-900">{tr(item.heading, language)}</h3>
+                    <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-slate-500">{tr(item.body, language)}</p>
                   </div>
                 </div>
               </div>
@@ -195,10 +175,10 @@ export default function BantuanPage() {
           </div>
 
           <div className="mt-8 space-y-3">
-            {kebijakanPrivasi.map((item, idx) => (
+            {privacyData.items.map((item, idx) => (
               <div key={idx} className="rounded-2xl border border-slate-100 bg-white p-5">
-                <h3 className="text-sm font-semibold text-navy-900">{t(item.titleKey)}</h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{t(item.descKey)}</p>
+                <h3 className="text-sm font-semibold text-navy-900">{tr(item.heading, language)}</h3>
+                <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-slate-500">{tr(item.body, language)}</p>
               </div>
             ))}
           </div>
@@ -216,26 +196,21 @@ export default function BantuanPage() {
             <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">{t("help.csDesc")}</p>
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-slate-100 bg-white p-5 text-left transition-colors hover:border-slate-200">
-                <MessageCircle className="h-5 w-5 text-brand-blue" />
-                <h3 className="mt-2 text-sm font-semibold text-navy-900">{t("help.liveChat")}</h3>
-                <p className="mt-1 text-xs text-slate-500">{t("help.csDaily")}</p>
-              </div>
-              <div className="rounded-2xl border border-slate-100 bg-white p-5 text-left transition-colors hover:border-slate-200">
-                <Mail className="h-5 w-5 text-brand-blue" />
-                <h3 className="mt-2 text-sm font-semibold text-navy-900">Email</h3>
-                <p className="mt-1 break-all text-xs text-slate-500">esmodkeisya@gmail.com</p>
-              </div>
-              <div className="rounded-2xl border border-slate-100 bg-white p-5 text-left transition-colors hover:border-slate-200">
-                <Phone className="h-5 w-5 text-brand-blue" />
-                <h3 className="mt-2 text-sm font-semibold text-navy-900">{t("help.phone")}</h3>
-                <p className="mt-1 text-xs text-slate-500">08.00–20.00</p>
-              </div>
+              {contactChannels.map((item, idx) => {
+                const Icon = contactIcons[idx] ?? MessageCircle;
+                return (
+                  <div key={idx} className="rounded-2xl border border-slate-100 bg-white p-5 text-left transition-colors hover:border-slate-200">
+                    <Icon className="h-5 w-5 text-brand-blue" />
+                    <h3 className="mt-2 text-sm font-semibold text-navy-900">{tr(item.heading, language)}</h3>
+                    <p className="mt-1 break-all text-xs text-slate-500">{tr(item.body, language)}</p>
+                  </div>
+                );
+              })}
             </div>
 
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               <Link
-                href="/kontak"
+                href="/hubungi-cs"
                 className="inline-flex items-center gap-2 rounded-xl bg-navy-900 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-navy-800"
               >
                 {t("help.contactUs")}

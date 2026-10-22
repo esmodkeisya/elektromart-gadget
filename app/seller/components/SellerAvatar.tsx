@@ -1,26 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 export default function SellerAvatar({ className = "h-9 w-9" }: { className?: string }) {
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    void supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) return;
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("avatar_url")
-        .eq("id", data.user.id)
-        .maybeSingle();
-      if (mounted) setAvatarUrl(profile?.avatar_url ?? null);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const { profile } = useCurrentUser();
+  const avatarUrl = profile?.avatar_url ?? null;
 
   if (avatarUrl) {
     return <img src={avatarUrl} alt="Profil seller" className={`rounded-full object-cover ${className}`} />;

@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { Star, Store as StoreIcon, BadgeCheck, CalendarDays, Package, MapPin } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { BestSellerCard } from "@/components/produk/ProductCard";
-import { api } from "@/lib/api";
 import { slugify } from "@/lib/slugify";
 import { recordToProduct, useLiveProducts } from "@/hooks/useLiveProducts";
+import { useApiData } from "@/hooks/useApiData";
 import { useLanguage } from "@/lib/i18n";
 
 type StoreRecord = {
@@ -52,29 +52,13 @@ function formatDate(value?: string | null) {
 export default function StorePage() {
   const { t } = useLanguage();
   const liveProducts = useLiveProducts();
-  const [store, setStore] = useState<StoreRecord | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    void api<{ stores: StoreRecord[] }>("/api/stores")
-      .then((data) => {
-        if (!active) return;
-        const found = (data.stores || []).find(
-          (s) => (s.store_name && slugify(s.store_name) === STORE_SLUG) || slugify(s.name || "") === STORE_SLUG
-        );
-        setStore(found || null);
-      })
-      .catch(() => {
-        if (active) setStore(null);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const { data: storesData, isLoading } = useApiData<{ stores: StoreRecord[] }>("/api/stores");
+  const store = useMemo(() => {
+    return (storesData?.stores || []).find(
+      (s) => (s.store_name && slugify(s.store_name) === STORE_SLUG) || slugify(s.name || "") === STORE_SLUG
+    ) || null;
+  }, [storesData]);
+  const loading = isLoading && !storesData;
 
   const products = useMemo(() => {
     let list = store ? liveProducts.filter((p) => p.seller_id === store.id) : liveProducts;

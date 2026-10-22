@@ -1,6 +1,3 @@
--- Jalankan seluruh script ini di Supabase SQL Editor.
--- User login tersimpan di auth.users; data aplikasi tersimpan di public.profiles.
-
 create type public.user_role as enum ('buyer', 'seller', 'admin');
 
 create table public.profiles (
@@ -38,8 +35,7 @@ create policy "Users can update their own profile"
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
--- Jadikan akun Keisya sebagai admin Developer.
--- Jalankan setelah user dibuat di Supabase Authentication.
+-- Jadikan akun Keisyaesmod disetel sebagai admin/developer
 do $$
 declare
   admin_id uuid;
@@ -299,10 +295,7 @@ on conflict (slug) do update set
   attributes = excluded.attributes,
   updated_at = now();
 
--- ============================================================
 -- Order & Order Items (sinkron checkout -> dashboard)
--- Jalankan blok ini di SQL Editor setelah tabel di atas ada.
--- ============================================================
 
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
@@ -627,11 +620,7 @@ on conflict (seller_id, name) do update set
   image_url = excluded.image_url,
   updated_at = now();
 
--- ============================================================
 -- Storage bucket "products" untuk foto produk dari dashboard seller
--- (bucket-nya dibuat otomatis oleh script seed; blok policy ini wajib
--- dijalankan sekali di SQL Editor).
--- ============================================================
 
 drop policy if exists "Public read buckets" on storage.objects;
 create policy "Public read buckets"

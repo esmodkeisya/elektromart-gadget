@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useLanguage } from "@/lib/i18n";
@@ -8,16 +8,27 @@ import { useLanguage } from "@/lib/i18n";
 export default function ResetPasswordPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    const prefill = new URLSearchParams(window.location.search).get("email");
+    if (prefill) setEmail(prefill);
+  }, []);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setMessage("");
+
+    if (!email.trim() || !email.includes("@")) {
+      setError(t("auth.forgotEmailFirst"));
+      return;
+    }
 
     if (password.length < 8) {
       setError(t("auth.minPasswordError"));
@@ -30,7 +41,7 @@ export default function ResetPasswordPage() {
     }
 
     setIsSubmitting(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
+    const { error: updateError } = await supabase.auth.resetPassword({ email: email.trim(), password });
     setIsSubmitting(false);
 
     if (updateError) {
@@ -52,6 +63,18 @@ export default function ResetPasswordPage() {
         </p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <label className="block text-sm font-medium text-slate-700">
+            {t("auth.email")}
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder={t("auth.placeholderEmail")}
+              autoComplete="email"
+              className="mt-2 h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-[#6659f2] focus:ring-2 focus:ring-[#6659f2]/20"
+            />
+          </label>
+
           <label className="block text-sm font-medium text-slate-700">
             {t("auth.newPassword")}
             <input

@@ -5,6 +5,7 @@ import { Check, ImagePlus, Upload } from "lucide-react";
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
 import { api } from "@/lib/api";
+import { useApiData, mutateApi } from "@/hooks/useApiData";
 import { supabase } from "@/lib/supabase";
 
 interface Schedule {
@@ -38,27 +39,30 @@ export default function SellerProfile() {
   const [schedule, setSchedule] = useState(initialSchedule);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const { data: profileData, error: profileError, isLoading } = useApiData<{ profile: {
+    store_name?: string | null;
+    store_description?: string | null;
+    avatar_url?: string | null;
+    store_banner_url?: string | null;
+    operating_hours?: Schedule[] | null;
+  } }>("/api/profile");
 
   useEffect(() => {
-    void api<{ profile: { store_name?: string | null; store_description?: string | null; avatar_url?: string | null; store_banner_url?: string | null; operating_hours?: Schedule[] | null } }>("/api/profile")
-      .then(({ profile }) => {
-        if (profile.store_name) setStoreName(profile.store_name);
-        if (profile.store_description !== null && profile.store_description !== undefined) setDescription(profile.store_description);
-        if (profile.avatar_url) {
-          setLogoName("Logo tersimpan");
-          setLogoUrl(profile.avatar_url);
-        }
-        if (profile.store_banner_url) {
-          setBannerName("Banner tersimpan");
-          setBannerUrl(profile.store_banner_url);
-        }
-        if (profile.operating_hours?.length) setSchedule(profile.operating_hours);
-      })
-      .catch((requestError) => setError(requestError instanceof Error ? requestError.message : "Gagal memuat profil toko."))
-      .finally(() => setIsLoading(false));
-  }, []);
+    if (!profileData) return;
+    const profile = profileData.profile;
+    if (profile.store_name) setStoreName(profile.store_name);
+    if (profile.store_description !== null && profile.store_description !== undefined) setDescription(profile.store_description);
+    if (profile.avatar_url) {
+      setLogoName("Logo tersimpan");
+      setLogoUrl(profile.avatar_url);
+    }
+    if (profile.store_banner_url) {
+      setBannerName("Banner tersimpan");
+      setBannerUrl(profile.store_banner_url);
+    }
+    if (profile.operating_hours?.length) setSchedule(profile.operating_hours);
+  }, [profileData]);
 
   async function selectFile(event: ChangeEvent<HTMLInputElement>, type: "logo" | "banner") {
     const file = event.target.files?.[0];
@@ -113,6 +117,7 @@ export default function SellerProfile() {
       });
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2400);
+      mutateApi("/api/profile");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Perubahan profil gagal disimpan.");
     } finally {
@@ -137,7 +142,7 @@ export default function SellerProfile() {
           </div>
 
           {isLoading ? <p className="mb-4 text-[11px] text-seller-muted">Memuat profil toko...</p> : null}
-          {error ? <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-[11px] text-red-600">{error}</p> : null}
+          {error || profileError ? <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-[11px] text-red-600">{error || profileError?.message}</p> : null}
 
           <section className="mb-5 rounded-lg border border-[#DEE6F3] bg-white px-5 py-5 shadow-card sm:px-6">
             <h2 className="border-b border-[#E3E9F3] pb-3 text-[14px] font-semibold text-seller-ink">{t("seller.storeBasicInfo")}</h2>

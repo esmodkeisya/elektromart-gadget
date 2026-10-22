@@ -5,10 +5,12 @@ import Link from "next/link";
 import {
   Camera,
   Check,
+  CheckCircle2,
   ChevronRight,
   CreditCard,
   Home,
   Landmark,
+  Loader2,
   Lock,
   Mail,
   MapPin,
@@ -29,6 +31,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { supabase } from "@/lib/supabase";
 import { api, PROVINCES, type OrderRecord, type ShippingAddress } from "@/lib/api";
+import { useApiData, mutateApi } from "@/hooks/useApiData";
 import { useLanguage } from "@/lib/i18n";
 
 type Profile = {
@@ -110,6 +113,14 @@ function formatDate(iso: string) {
 export default function BuyerProfilPage() {
   const { t } = useLanguage();
   const [section, setSection] = useState<Section>("profil");
+  const { data: sessionData, error: sessionError } = useApiData<{ user: { id: string; email?: string } | null }>("/api/auth/user");
+  const userId = sessionData?.user?.id ?? null;
+  const { data: profileRes, error: profileError } = useApiData<{ data: (Partial<Profile> & { username?: string | null }) | null }>(
+    userId ? `/api/profiles?id=${userId}` : null
+  );
+  const { data: addressesRes } = useApiData<{ addresses: ShippingAddress[] }>(userId ? "/api/addresses" : null);
+  const { data: accountsRes } = useApiData<{ accounts: BankAccount[] }>(userId ? "/api/bank-accounts" : null);
+  const { data: ordersRes, error: ordersError } = useApiData<{ orders: OrderRecord[] }>(userId ? "/api/orders" : null);
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -134,6 +145,9 @@ export default function BuyerProfilPage() {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [orderFilter, setOrderFilter] = useState("");
   const [ordersLoaded, setOrdersLoaded] = useState(false);
+  const [completingId, setCompletingId] = useState<string | null>(null);
+  const [orderActionMsg, setOrderActionMsg] = useState("");
+  const [orderActionErr, setOrderActionErr] = useState("");
 
   function labelText(label: string) {
     if (label === "office") return t("profile.labelOffice");
@@ -142,62 +156,75 @@ export default function BuyerProfilPage() {
   }
 
   async function loadAddresses() {
-    const data = await api<{ addresses: ShippingAddress[] }>("/api/addresses");
-    setAddresses(data.addresses || []);
+    await mutateApi("/api/addresses");
   }
 
   async function loadBankAccounts() {
-    const data = await api<{ accounts: BankAccount[] }>("/api/bank-accounts");
-    setAccounts(data.accounts || []);
+    await mutateApi("/api/bank-accounts");
   }
 
   async function loadOrders() {
-    const data = await api<{ orders: OrderRecord[] }>("/api/orders");
-    setOrders(data.orders || []);
-    setOrdersLoaded(true);
+    await mutateApi("/api/orders");
+  }
+
+  async function completeOrder(orderId: string) {
+    setCompletingId(orderId);
+    setOrderActionMsg("");
+    setOrderActionErr("");
+    try {
+      await api<{ order: OrderRecord }>(`/api/orders/${orderId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "completed" }),
+      });
+      mutateApi("/api/orders");
+      setOrderActionMsg(t("profile.orderCompletedSuccess"));
+    } catch (err) {
+      setOrderActionErr(err instanceof Error ? err.message : t("profile.orderActionFailed"));
+    } finally {
+      setCompletingId(null);
+    }
   }
 
   useEffect(() => {
-    let mounted = true;
-    async function loadProfile() {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        setError(t("profile.sessionNotFoundLogin"));
-        setLoading(false);
-        return;
-      }
-      setEmail(userData.user.email ?? "");
-      setUsername(userData.user.email?.split("@")[0] ?? "");
-      const { data, error: profileError } = await supabase
-        .from("profiles")
-        .select("full_name, phone, avatar_url, role, username, date_of_birth, gender")
-        .eq("id", userData.user.id)
-        .maybeSingle();
-      if (!mounted) return;
-      if (profileError) setError(profileError.message);
-      if (data) {
-        setProfile({
-          ...emptyProfile,
-          ...data,
-          date_of_birth: data.date_of_birth || "",
-          gender: data.gender || "",
-        });
-        if (data.username) setUsername(data.username);
-      }
-      try {
-        await loadAddresses();
-        await loadBankAccounts();
-        await loadOrders();
-      } catch (err) {
-        if (mounted) setError(err instanceof Error ? err.message : t("api.unavailable"));
-      }
-      if (mounted) setLoading(false);
+    if (sessionData) {
+      setEmail(sessionData.user?.email ?? "");
+      if (sessionData.user?.email) setUsername(sessionData.user.email.split("@")[0]);
     }
-    void loadProfile();
-    return () => {
-      mounted = false;
-    };
-  }, [t]);
+  }, [sessionData]);
+
+  useEffect(() => {
+    if (!profileRes?.data) return;
+    const data = profileRes.data;
+    setProfile({
+      ...emptyProfile,
+      ...data,
+      date_of_birth: data.date_of_birth || "",
+      gender: data.gender || "",
+    });
+    if (data.username) setUsername(data.username);
+  }, [profileRes]);
+
+  useEffect(() => {
+    if (addressesRes) setAddresses(addressesRes.addresses || []);
+  }, [addressesRes]);
+
+  useEffect(() => {
+    if (accountsRes) setAccounts(accountsRes.accounts || []);
+  }, [accountsRes]);
+
+  useEffect(() => {
+    if (ordersRes) {
+      setOrders(ordersRes.orders || []);
+      setOrdersLoaded(true);
+    }
+  }, [ordersRes]);
+
+  useEffect(() => {
+    if (sessionError || profileError) {
+      setError((sessionError ?? profileError)?.message || t("profile.sessionNotFoundLogin"));
+    }
+    if (sessionData || sessionError) setLoading(false);
+  }, [sessionData, sessionError, profileError, t]);
 
   function updateField(field: keyof Profile, value: string) {
     setProfile((current) => ({ ...current, [field]: value }));
@@ -851,6 +878,13 @@ export default function BuyerProfilPage() {
                     })}
                   </div>
 
+                  {orderActionMsg ? (
+                    <p className="rounded-lg bg-[#E9F8EF] px-3 py-2 text-sm font-medium text-[#16A34A]">{orderActionMsg}</p>
+                  ) : null}
+                  {orderActionErr ? (
+                    <p className="rounded-lg bg-[#FDECEC] px-3 py-2 text-sm font-medium text-[#E11D48]">{orderActionErr}</p>
+                  ) : null}
+
                   {ordersLoaded && visibleOrders.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center shadow-card">
                       <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-50">
@@ -904,6 +938,31 @@ export default function BuyerProfilPage() {
                             <span className="ml-1 text-sm font-bold text-navy-900">{formatRupiah(order.total)}</span>
                           </span>
                         </div>
+
+                        {order.status === "shipped" ? (
+                          <div className="mt-3 flex flex-col items-end gap-2 border-t border-slate-100 pt-3">
+                            {order.tracking_number ? (
+                              <p className="w-full text-xs text-slate-500">
+                                {t("seller.trackingNumber")}: <span className="font-medium text-navy-900">{order.tracking_number}</span>
+                              </p>
+                            ) : null}
+                            <button
+                              type="button"
+                              disabled={completingId === order.id}
+                              onClick={() => void completeOrder(order.id)}
+                              className="flex items-center gap-2 rounded-lg bg-[#16A34A] px-4 py-2 text-sm font-semibold text-white hover:bg-[#15803D] disabled:opacity-50"
+                            >
+                              {completingId === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                              {t("profile.orderMarkCompleted")}
+                            </button>
+                          </div>
+                        ) : null}
+
+                        {order.status === "completed" && order.completed_at ? (
+                          <p className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-xs font-medium text-[#16A34A]">
+                            <CheckCircle2 className="h-3.5 w-3.5" /> {t("profile.orderCompletedOn", { date: formatDate(order.completed_at) })}
+                          </p>
+                        ) : null}
                       </div>
                     );
                   })}

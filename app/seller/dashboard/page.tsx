@@ -9,10 +9,10 @@ import {
   Percent,
   Truck,
 } from "lucide-react";
-import { useEffect, useState } from "react";
 import { useLanguage } from "@/lib/i18n";
 import TopBar from "../components/TopBar";
-import { api, type ProductRecord } from "@/lib/api";
+import { type ProductRecord } from "@/lib/api";
+import { useApiData } from "@/hooks/useApiData";
 import { formatRupiah } from "@/lib/data";
 
 interface StatCard {
@@ -42,7 +42,12 @@ interface SellerStats {
 
 export default function Dashboard() {
   const { t } = useLanguage();
-  const [apiStats, setApiStats] = useState<SellerStats>({
+  const { data } = useApiData<{
+    stats: SellerStats;
+    weekly?: WeekPoint[];
+    recentProducts?: ProductRecord[];
+  }>("/api/dashboard/seller");
+  const apiStats: SellerStats = data?.stats ?? {
     products: 0,
     active: 0,
     lowStock: 0,
@@ -50,23 +55,9 @@ export default function Dashboard() {
     totalRevenue: 0,
     totalOrders: 0,
     activeOrders: 0,
-  });
-  const [weekly, setWeekly] = useState<WeekPoint[]>([]);
-  const [recentProducts, setRecentProducts] = useState<ProductRecord[]>([]);
-
-  useEffect(() => {
-    void api<{
-      stats: SellerStats;
-      weekly?: WeekPoint[];
-      recentProducts?: ProductRecord[];
-    }>("/api/dashboard/seller")
-      .then((data) => {
-        setApiStats(data.stats);
-        setWeekly(data.weekly || []);
-        setRecentProducts(data.recentProducts || []);
-      })
-      .catch(() => undefined);
-  }, []);
+  };
+  const weekly: WeekPoint[] = data?.weekly ?? [];
+  const recentProducts: ProductRecord[] = data?.recentProducts ?? [];
 
   const stats: StatCard[] = [
     { labelKey: "seller.totalSales", value: formatRupiah(apiStats.totalRevenue), change: `${apiStats.totalOrders} ${t("seller.orders")}`, changeUp: true, icon: CreditCard, iconWrap: "bg-[#E8EEF8] text-[#3B5B8C]" },

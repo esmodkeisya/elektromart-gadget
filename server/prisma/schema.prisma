@@ -1,0 +1,222 @@
+// Prisma schema untuk ElektroMart (menggantikan Supabase).
+// Database: MySQL / MariaDB (phpMyAdmin). Lihat DATABASE_URL di .env.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  buyer
+  seller
+  admin
+}
+
+// Menggantikan tabel auth.users milik Supabase.
+model User {
+  id            String   @id @db.Char(36)
+  email         String   @unique @db.VarChar(255)
+  phone         String?  @db.VarChar(32)
+  password_hash String   @db.VarChar(255)
+  user_metadata Json?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+
+  @@map("users")
+}
+
+model Profile {
+  id                 String    @id @db.Char(36)
+  role               UserRole  @default(buyer)
+  job_title          String?   @db.VarChar(120)
+  full_name          String?   @db.VarChar(255)
+  username           String?   @db.VarChar(120)
+  store_name         String?   @db.VarChar(255)
+  phone              String?   @db.VarChar(32)
+  store_address      String?   @db.Text
+  avatar_url         String?   @db.Text
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now())
+  date_of_birth      DateTime? @db.Date
+  gender             String?   @db.VarChar(20)
+  bio                String?   @db.Text
+  account_status     String?   @default("active") @db.VarChar(20)
+  seller_status      String?   @db.VarChar(20)
+  store_description  String?   @db.Text
+  store_banner_url   String?   @db.Text
+  operating_hours    Json?
+
+  @@index([role])
+  @@map("profiles")
+}
+
+model ShippingAddress {
+  id         String   @id @default(uuid()) @db.Char(36)
+  user_id    String   @db.Char(36)
+  label      String   @default("home") @db.VarChar(20)
+  recipient  String   @db.VarChar(255)
+  phone      String?  @db.VarChar(32)
+  address    String   @db.Text
+  city       String   @db.VarChar(120)
+  province   String   @default("Jawa Timur") @db.VarChar(120)
+  postal     String?  @db.VarChar(20)
+  is_default Boolean  @default(false)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+
+  @@index([user_id])
+  @@map("shipping_addresses")
+}
+
+model Category {
+  id            String   @id @default(uuid()) @db.Char(36)
+  name          String   @db.VarChar(120)
+  slug          String   @unique @db.VarChar(120)
+  color         String?  @default("#1a3fd6") @db.VarChar(20)
+  icon          String?  @db.VarChar(60)
+  sort_order    Int      @default(0)
+  subcategories Json?
+  attributes    Json?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now())
+
+  @@map("categories")
+}
+
+model Product {
+  id          String   @id @default(uuid()) @db.Char(36)
+  seller_id   String   @db.Char(36)
+  name        String   @db.VarChar(255)
+  sku         String?  @db.VarChar(120)
+  category    String?  @db.VarChar(120)
+  description String?  @db.Text
+  price       Int      @default(0)
+  stock       Int      @default(0)
+  status      String   @default("active") @db.VarChar(30)
+  image_url   String?  @db.Text
+  images      Json?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now())
+
+  @@unique([seller_id, name])
+  @@index([seller_id])
+  @@map("products")
+}
+
+model Order {
+  id              String   @id @default(uuid()) @db.Char(36)
+  buyer_id        String   @db.Char(36)
+  order_number    String   @unique @db.VarChar(60)
+  status          String   @default("waiting_payment") @db.VarChar(30)
+  payment_method  String?  @db.VarChar(120)
+  payment_group   String?  @db.VarChar(60)
+  courier         String?  @db.VarChar(120)
+  shipping_address Json?
+  shipping_eta    String?  @db.VarChar(120)
+  tracking_number String?  @db.VarChar(120)
+  shipping_deadline DateTime?
+  cancel_reason   String?  @db.Text
+  subtotal        Int      @default(0)
+  product_fee     Int      @default(0)
+  insurance_fee   Int      @default(0)
+  shipping_fee    Int      @default(0)
+  total           Int      @default(0)
+  processed_at    DateTime?
+  shipped_at      DateTime?
+  completed_at    DateTime?
+  cancelled_at    DateTime?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now())
+
+  @@index([buyer_id])
+  @@index([created_at])
+  @@map("orders")
+}
+
+model OrderItem {
+  id            String   @id @default(uuid()) @db.Char(36)
+  order_id      String   @db.Char(36)
+  product_id    String?  @db.Char(36)
+  seller_id     String?  @db.Char(36)
+  product_name  String   @db.VarChar(255)
+  product_image String?  @db.Text
+  price         Int      @default(0)
+  qty           Int      @default(1)
+  subtotal      Int      @default(0)
+  created_at    DateTime @default(now())
+
+  @@index([order_id])
+  @@index([seller_id])
+  @@map("order_items")
+}
+
+model Report {
+  id            String   @id @default(uuid()) @db.Char(36)
+  product_id    String?  @db.Char(36)
+  seller_id     String?  @db.Char(36)
+  reporter_id   String?  @db.Char(36)
+  product_name  String   @db.VarChar(255)
+  product_image String?  @db.Text
+  reason        String   @db.VarChar(120)
+  description   String?  @db.Text
+  status        String   @default("pending") @db.VarChar(30)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now())
+
+  @@index([seller_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("reports")
+}
+
+model BankAccount {
+  id             String   @id @default(uuid()) @db.Char(36)
+  user_id        String   @db.Char(36)
+  type           String   @default("account") @db.VarChar(20)
+  bank_name      String   @db.VarChar(120)
+  account_name   String   @db.VarChar(255)
+  account_number String   @db.VarChar(60)
+  created_at     DateTime @default(now())
+
+  @@index([user_id])
+  @@map("bank_accounts")
+}
+
+model Conversation {
+  id                  String   @id @default(uuid()) @db.Char(36)
+  buyer_id            String   @db.Char(36)
+  seller_id           String   @db.Char(36)
+  buyer_last_read_at  DateTime @default(now())
+  seller_last_read_at DateTime @default(now())
+  created_at          DateTime @default(now())
+  updated_at          DateTime @default(now())
+
+  @@unique([buyer_id, seller_id])
+  @@index([buyer_id])
+  @@index([seller_id])
+  @@map("conversations")
+}
+
+model Message {
+  id              String   @id @db.Char(36)
+  conversation_id String   @db.Char(36)
+  sender_id       String   @db.Char(36)
+  text            String?  @db.Text
+  attachment      Json?
+  created_at      DateTime @default(now())
+
+  @@index([conversation_id])
+  @@map("messages")
+}
+
+model HelpPage {
+  slug       String   @id @db.VarChar(60)
+  data       Json
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@map("help_pages")
+}

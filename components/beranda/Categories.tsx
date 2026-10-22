@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import {
   Smartphone,
   Laptop,
@@ -17,7 +17,8 @@ import Link from "next/link";
 import { categories as fallbackCategories } from "@/lib/data";
 import { slugify } from "@/lib/slugify";
 import { useLanguage } from "@/lib/i18n";
-import { api, type CategoryRecord } from "@/lib/api";
+import { useApiData } from "@/hooks/useApiData";
+import { type CategoryRecord } from "@/lib/api";
 
 const iconMap: Record<string, LucideIcon> = {
   Smartphone,
@@ -57,24 +58,17 @@ function isHomepageCategory(category: { name: string }) {
 
 export default function Categories() {
   const { t } = useLanguage();
-  const [categories, setCategories] = useState(
-    fallbackCategories.filter(isHomepageCategory),
-  );
-
-  useEffect(() => {
-    void api<{ categories: CategoryRecord[] }>("/api/categories")
-      .then((data) => {
-        if (!data.categories?.length) return;
-        setCategories(
-          data.categories.filter(isHomepageCategory).map((category) => ({
-            id: category.id,
-            name: category.name,
-            icon: category.icon || "Smartphone",
-          })),
-        );
-      })
-      .catch(() => undefined);
-  }, []);
+  const { data } = useApiData<{ categories: CategoryRecord[] }>("/api/categories");
+  const categories = useMemo(() => {
+    if (!data?.categories?.length) return fallbackCategories.filter(isHomepageCategory);
+    return data.categories
+      .filter(isHomepageCategory)
+      .map((category) => ({
+        id: category.id,
+        name: category.name,
+        icon: category.icon || "Smartphone",
+      }));
+  }, [data]);
   return (
     <section id="kategori" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
       <div className="mb-6 flex items-end justify-between">

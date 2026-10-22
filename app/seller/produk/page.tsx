@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import Pagination from "../components/Pagination";
 import { api, type ProductRecord } from "@/lib/api";
+import { useApiData, mutateApi } from "@/hooks/useApiData";
 
 function formatRupiah(value: number) {
   return "Rp " + value.toLocaleString("id-ID");
@@ -29,24 +30,15 @@ function StatusBadge({ status }: { status: ProductRecord["status"] }) {
 
 export default function Products() {
   const [filter, setFilter] = useState("all");
-  const [products, setProducts] = useState<ProductRecord[]>([]);
+  const { data, error: loadError } = useApiData<{ products: ProductRecord[] }>("/api/products");
+  const products = data?.products ?? [];
   const [error, setError] = useState("");
   const router = useRouter();
   const { t } = useLanguage();
 
   async function load() {
-    try {
-      const data = await api<{ products: ProductRecord[] }>("/api/products");
-      setProducts(data.products || []);
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("api.unavailable"));
-    }
+    await mutateApi("/api/products");
   }
-
-  useEffect(() => {
-    void load();
-  }, []);
 
   const filtered = products.filter((p) => {
     if (filter === "active") return p.status === "active";
@@ -88,7 +80,7 @@ export default function Products() {
             <Plus size={16} /> {t("seller.addProduct")}
           </button>
         </div>
-        {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
+        {error || loadError ? <p className="mb-4 text-sm text-red-600">{error || loadError?.message}</p> : null}
 
         <div className="rounded-2xl bg-white p-5 shadow-card">
           <div className="mb-5 flex flex-wrap items-center gap-2">

@@ -9,3 +9,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Backend lokal
+server/node_modules/
+server/uploads/
+server/prisma/supabase-export.json

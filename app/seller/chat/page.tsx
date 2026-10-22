@@ -10,7 +10,7 @@ export default function SellerChatPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TopBar placeholder={t("seller.searchOrdersBuyers")} />
-      <ChatClient backHref="/seller/dashboard" backLabel={t("home")} />
+      <ChatClient />
     </div>
   );
 }

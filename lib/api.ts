@@ -110,6 +110,8 @@ export type OrderItemRecord = {
   price: number;
   qty: number;
   subtotal: number;
+  product_stock?: number | null;
+  product_status?: string | null;
 };
 
 export type OrderRecord = {
@@ -128,14 +130,29 @@ export type OrderRecord = {
     province?: string;
     postal?: string;
   } | null;
+  shipping_eta: string | null;
+  tracking_number: string | null;
+  shipping_deadline: string | null;
+  cancel_reason: string | null;
   subtotal: number;
   product_fee: number;
   insurance_fee: number;
   shipping_fee: number;
   total: number;
+  processed_at: string | null;
+  shipped_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
   created_at: string;
   updated_at: string;
   items?: OrderItemRecord[];
+  buyer?: {
+    id?: string;
+    full_name?: string | null;
+    username?: string | null;
+    phone?: string | null;
+    avatar_url?: string | null;
+  } | null;
 };
 
 export const PROVINCES = [

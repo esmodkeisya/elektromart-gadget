@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Settings } from "lucide-react";
 import AdminAvatar from "./AdminAvatar";
-import { supabase } from "@/lib/supabase";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useLanguage } from "@/lib/i18n";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 
@@ -16,16 +15,8 @@ interface TopBarProps {
 export default function TopBar({ breadcrumb }: TopBarProps) {
   const router = useRouter();
   const { t } = useLanguage();
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    void supabase.auth.getUser().then(({ data }) => {
-      if (!data.user) return;
-      void supabase.from("profiles").select("avatar_url").eq("id", data.user.id).maybeSingle().then(({ data: profile }) => {
-        setAvatarUrl(profile?.avatar_url ?? null);
-      });
-    });
-  }, []);
+  const { profile } = useCurrentUser();
+  const avatarUrl = profile?.avatar_url ?? null;
 
   return (
     <header className="flex items-center justify-end gap-4 border-b border-[#EEF1F6] bg-white px-8 py-4">

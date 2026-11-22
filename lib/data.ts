@@ -28,6 +28,10 @@ export type Product = {
   specs?: string[];
   stock?: number;
   weight?: string;
+  weightKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
   condition?: string;
   category?: string;
   reviewCount?: number;

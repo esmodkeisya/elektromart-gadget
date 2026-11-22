@@ -1,33 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Zap } from "lucide-react";
-import { flashSaleProducts, uniqueProducts } from "@/lib/data";
+import { Loader2, Zap } from "lucide-react";
 import { FlashSaleCard } from "@/components/produk/ProductCard";
+import { flashRecordToProduct, useFlashSale } from "@/hooks/useFlashSale";
 import { useLanguage } from "@/lib/i18n";
 
-function useCountdown(initialSeconds: number) {
-  const [seconds, setSeconds] = useState(initialSeconds);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setSeconds((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-
-  const pad = (n: number) => n.toString().padStart(2, "0");
-
-  return { hrs: pad(hrs), mins: pad(mins), secs: pad(secs) };
-}
-
 export default function FlashSale() {
-  const { hrs, mins, secs } = useCountdown(7 * 3600 + 56 * 60 + 55);
   const { t } = useLanguage();
+  const flashSale = useFlashSale();
 
   return (
     <section id="flash-sale" className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
@@ -37,23 +17,28 @@ export default function FlashSale() {
             <Zap className="h-5 w-5 fill-white" />
             <h2 className="text-lg font-bold">{t("flashSale")}</h2>
           </div>
-          <div className="flex items-center gap-2 text-sm text-white">
-            <span>{t("endsIn")}</span>
-            <div className="flex items-center gap-1 font-mono font-bold">
-              <span className="rounded bg-black/20 px-2 py-1">{hrs}</span>
-              <span>:</span>
-              <span className="rounded bg-black/20 px-2 py-1">{mins}</span>
-              <span>:</span>
-              <span className="rounded bg-black/20 px-2 py-1">{secs}</span>
-            </div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-white">
+            <span>{t("admin.activeFlashSale")}</span>
+            <span className="rounded bg-black/20 px-2 py-1 font-mono">
+              {flashSale.loading ? "…" : `${flashSale.soldUnits}/${flashSale.quota} ${t("soldCount")}`}
+            </span>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 p-6 sm:grid-cols-3 lg:grid-cols-6">
-          {uniqueProducts(flashSaleProducts).map((product) => (
-            <FlashSaleCard key={product.id} product={product} />
-          ))}
-        </div>
+        {flashSale.loading ? (
+          <div className="flex items-center justify-center gap-2 px-6 py-12 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t("flashSaleLoading")}
+          </div>
+        ) : flashSale.products.length ? (
+          <div className="grid grid-cols-2 gap-4 p-6 sm:grid-cols-3 lg:grid-cols-6">
+            {flashSale.products.map((product) => (
+              <FlashSaleCard key={product.id} product={flashRecordToProduct(product)} />
+            ))}
+          </div>
+        ) : (
+          <p className="px-6 py-10 text-center text-sm text-slate-500">{t("admin.noFlashSale")}</p>
+        )}
       </div>
     </section>
   );

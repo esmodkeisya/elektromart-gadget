@@ -1,23 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Zap } from "lucide-react";
+import { Loader2, Zap } from "lucide-react";
 import Link from "next/link";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import { FlashSaleCard } from "@/components/produk/ProductCard";
-import { flashSaleProducts } from "@/lib/data";
+import { flashRecordToProduct, useFlashSale } from "@/hooks/useFlashSale";
 import { useLanguage } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 
-function pad(value: number) {
-  return value.toString().padStart(2, "0");
-}
-
 export default function FlashSalePageClient() {
   const { t } = useLanguage();
+  const flashSale = useFlashSale();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [seconds, setSeconds] = useState(7 * 3600 + 56 * 60 + 55);
 
   useEffect(() => {
     let active = true;
@@ -32,17 +28,6 @@ export default function FlashSalePageClient() {
       listener.subscription.unsubscribe();
     };
   }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setSeconds((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -60,23 +45,30 @@ export default function FlashSalePageClient() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md">
-            <span>{t("endsIn")}</span>
-            <div className="flex items-center gap-1 font-mono font-bold">
-              <span className="rounded bg-black/20 px-2 py-1">{pad(hrs)}</span>
-              <span>:</span>
-              <span className="rounded bg-black/20 px-2 py-1">{pad(mins)}</span>
-              <span>:</span>
-              <span className="rounded bg-black/20 px-2 py-1">{pad(secs)}</span>
-            </div>
+          <div className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md">
+            <span>{t("admin.activeFlashSale")}</span>
+            <span className="rounded bg-black/20 px-2 py-1 font-mono font-bold">
+              {flashSale.loading ? "…" : `${flashSale.soldUnits}/${flashSale.quota} ${t("soldCount")}`}
+            </span>
           </div>
         </div>
 
-        <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          {flashSaleProducts.map((product) => (
-            <FlashSaleCard key={product.id} product={product} />
-          ))}
-        </div>
+        {flashSale.loading ? (
+          <div className="mt-8 flex items-center justify-center gap-2 rounded-2xl border border-slate-100 bg-white px-6 py-14 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t("flashSaleLoading")}
+          </div>
+        ) : flashSale.products.length ? (
+          <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            {flashSale.products.map((product) => (
+              <FlashSaleCard key={product.id} product={flashRecordToProduct(product)} />
+            ))}
+          </div>
+        ) : (
+          <p className="mt-8 rounded-2xl border border-slate-100 bg-white px-6 py-10 text-center text-sm text-slate-500">
+            {t("admin.noFlashSale")}
+          </p>
+        )}
 
         {isLoggedIn ? (
           <div className="mt-10 rounded-2xl border border-emerald-100 bg-emerald-50 px-6 py-6 text-center">

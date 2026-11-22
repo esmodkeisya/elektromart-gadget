@@ -20,15 +20,19 @@ import Footer from "@/components/Footer";
 import { useCart } from "@/lib/CartContext";
 import { formatRupiah } from "@/lib/data";
 import { useLanguage } from "@/lib/i18n";
+import { refreshLiveProducts } from "@/hooks/useLiveProducts";
+import ShippingBreakdownPanel from "@/components/checkout/ShippingBreakdown";
 
 export default function PaymentSuccessPage() {
   const router = useRouter();
   const { t } = useLanguage();
-  const { checkoutDetail } = useCart();
+  const { checkoutDetail, hydrated } = useCart();
   const [countdown, setCountdown] = useState(10);
   const [note, setNote] = useState("");
 
   useEffect(() => {
+    refreshLiveProducts();
+    if (!hydrated) return;
     if (!checkoutDetail) {
       router.replace("/beranda");
       return;
@@ -44,7 +48,7 @@ export default function PaymentSuccessPage() {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [checkoutDetail, router]);
+  }, [checkoutDetail, hydrated, router]);
 
   useEffect(() => {
     const approved = [
@@ -132,7 +136,13 @@ export default function PaymentSuccessPage() {
             <div className="flex justify-between">
               <span className="text-slate-500">{t("pay.shippingInsurance")}</span>
               <span className="font-medium text-navy-900">
-                {formatRupiah(detail.insuranceFee)}
+                {detail.insuranceSelected === false ? "-" : formatRupiah(detail.insuranceFee)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">{t("checkout.packing")}</span>
+              <span className="font-medium text-navy-900">
+                {(detail.packingFee || 0) > 0 ? formatRupiah(detail.packingFee || 0) : "-"}
               </span>
             </div>
             <div className="flex justify-between border-t border-slate-100 pt-2">
@@ -142,6 +152,8 @@ export default function PaymentSuccessPage() {
               </span>
             </div>
           </div>
+
+          <ShippingBreakdownPanel breakdown={detail.shippingBreakdown} className="mt-3" />
         </div>
 
         {/* Status timeline */}
@@ -206,10 +218,10 @@ export default function PaymentSuccessPage() {
             {t("success.continueShop")} <ChevronRight className="h-4 w-4" />
           </Link>
           <Link
-            href="/bantuan"
+            href={detail.orderDbId ? `/lacak/${detail.orderDbId}` : "/profil"}
             className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-navy-900 hover:bg-slate-50"
           >
-            {t("lacakPesanan")}
+            <Truck className="h-4 w-4" /> {t("lacakPesanan")}
           </Link>
         </div>
       </div>

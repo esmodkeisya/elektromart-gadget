@@ -10,6 +10,23 @@ const TOKEN_KEY = "elektromart_token";
 const USER_KEY = "elektromart_user";
 
 export type ShimError = { message: string } | null;
+type UserResult = { data: { user: any | null }; error: ShimError };
+
+// Hindari 3-4 request /api/auth/user yang identik setiap kali halaman dibuka.
+let userInFlight: Promise<UserResult> | null = null;
+let userInFlightToken: string | null = null;
+let userCacheToken: string | null = null;
+let userCacheAt = 0;
+let userCacheValue: Record<string, unknown> | null = null;
+const USER_TTL_MS = 5 * 60 * 1000;
+
+function invalidateUserCache() {
+  userCacheToken = null;
+  userCacheAt = 0;
+  userCacheValue = null;
+  userInFlight = null;
+  userInFlightToken = null;
+}
 
 function hasStorage() {
   return typeof window !== "undefined" && !!window.localStorage;
@@ -23,6 +40,12 @@ function getToken(): string | null {
 function setSession(user: unknown, token: string) {
   if (!hasStorage()) return;
   window.localStorage.setItem(TOKEN_KEY, token);
+  window.localStorage.setItem(USER_KEY, JSON.stringify(user ?? null));
+  invalidateUserCache();
+}
+
+function storeCurrentUser(user: unknown) {
+  if (!hasStorage()) return;
   window.localStorage.setItem(USER_KEY, JSON.stringify(user ?? null));
 }
 
@@ -38,6 +61,7 @@ function getUserCached(): Record<string, unknown> | null {
 }
 
 function clearSession() {
+  invalidateUserCache();
   if (!hasStorage()) return;
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
@@ -82,21 +106,41 @@ const auth = {
     return { data: { session: { access_token: token, user } }, error: null };
   },
 
-  async getUser(): Promise<{ data: { user: any | null }; error: ShimError }> {
+  async getUser(): Promise<UserResult> {
     const token = getToken();
     if (!token) return { data: { user: null }, error: null };
-    try {
-      const { ok, payload } = await request("/api/auth/user");
-      if (!ok) {
-        clearSession();
-        return { data: { user: null }, error: errorOf(payload, "Sesi tidak valid.") };
-      }
-      setSession(payload.user, token);
-      return { data: { user: payload.user }, error: null };
-    } catch {
-      const cached = getUserCached();
-      return { data: { user: cached }, error: null };
+
+    // Satu request untuk semua komponen yang bertanya bersamaan.
+    if (userInFlight && userInFlightToken === token) return userInFlight;
+    if (userCacheToken === token && Date.now() - userCacheAt < USER_TTL_MS) {
+      return { data: { user: userCacheValue }, error: null };
     }
+
+    userInFlightToken = token;
+    userInFlight = (async (): Promise<UserResult> => {
+      try {
+        const { ok, payload } = await request("/api/auth/user");
+        if (!ok) {
+          clearSession();
+          return { data: { user: null }, error: errorOf(payload, "Sesi tidak valid.") };
+        }
+        storeCurrentUser(payload.user);
+        userCacheValue = payload.user;
+        userCacheToken = token;
+        userCacheAt = Date.now();
+        return { data: { user: payload.user }, error: null };
+      } catch {
+        const cached = getUserCached();
+        userCacheValue = cached;
+        userCacheToken = token;
+        userCacheAt = Date.now();
+        return { data: { user: cached }, error: null };
+      } finally {
+        userInFlight = null;
+        userInFlightToken = null;
+      }
+    })();
+    return userInFlight;
   },
 
   async signInWithPassword({ email, phone, password }: { email?: string; phone?: string; password: string }) {

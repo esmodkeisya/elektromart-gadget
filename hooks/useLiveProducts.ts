@@ -1,22 +1,48 @@
 "use client";
 
-import { useApiData } from "@/hooks/useApiData";
-import { type ProductRecord } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, type ProductRecord } from "@/lib/api";
 import type { Product } from "@/lib/data";
 
-/**
- * Daftar produk live dari database (dipakai untuk menimpa mock data website).
- * Di-cache via SWR sehingga navigasi berikutnya tampil instan.
- */
-export function useLiveProducts(): ProductRecord[] {
-  const { data } = useApiData<{ products: ProductRecord[] }>("/api/products");
-  return data?.products ?? [];
+const PRODUCTS_UPDATED_EVENT = "elektromart-products-updated";
+
+let cached: Promise<ProductRecord[]> | null = null;
+
+function loadAll() {
+  if (!cached) {
+    cached = api<{ products: ProductRecord[] }>("/api/products")
+      .then((data) => data.products || [])
+      .catch(() => []);
+  }
+  return cached;
 }
 
-/** Sama seperti useLiveProducts, plus flag apakah data sudah terisi (untuk hindari kedip "tidak ditemukan"). */
-export function useLiveProductsState(): { products: ProductRecord[]; ready: boolean } {
-  const { data, isLoading } = useApiData<{ products: ProductRecord[] }>("/api/products");
-  return { products: data?.products ?? [], ready: Boolean(data) && !isLoading };
+/** Hapus cache dan beri tahu semua halaman yang memakai produk live. */
+export function refreshLiveProducts() {
+  cached = null;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(PRODUCTS_UPDATED_EVENT));
+  }
+}
+
+/** Daftar produk live dari database (dipakai untuk menimpa mock data website). */
+export function useLiveProducts(): ProductRecord[] {
+  const [items, setItems] = useState<ProductRecord[]>([]);
+  useEffect(() => {
+    let active = true;
+    const update = () => {
+      void loadAll().then((list) => {
+        if (active) setItems(list);
+      });
+    };
+    update();
+    window.addEventListener(PRODUCTS_UPDATED_EVENT, update);
+    return () => {
+      active = false;
+      window.removeEventListener(PRODUCTS_UPDATED_EVENT, update);
+    };
+  }, []);
+  return items;
 }
 
 /** Ubah record produk dari database ke bentuk Product yang dikenali komponen UI. */
@@ -36,6 +62,11 @@ export function recordToProduct(record: ProductRecord): Product {
     category: record.category || undefined,
     description: record.description || undefined,
     stock: record.stock,
+    weight: record.weight_kg ? `${record.weight_kg} kg` : undefined,
+    weightKg: record.weight_kg,
+    lengthCm: record.length_cm,
+    widthCm: record.width_cm,
+    heightCm: record.height_cm,
     store: {
       name: "Jaya store",
       location: "Jakarta",
@@ -61,6 +92,11 @@ export function applyLiveProduct(product: Product, live: ProductRecord[]): Produ
     description: db.description || product.description,
     image: db.image_url || images[0] || product.image,
     images: images.length ? images : product.images,
+    weight: db.weight_kg ? `${db.weight_kg} kg` : product.weight,
+    weightKg: db.weight_kg || product.weightKg,
+    lengthCm: db.length_cm || product.lengthCm,
+    widthCm: db.width_cm || product.widthCm,
+    heightCm: db.height_cm || product.heightCm,
   };
 }
 

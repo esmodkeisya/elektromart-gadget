@@ -30,15 +30,15 @@ import {
   applyLiveProduct,
   applyLiveProducts,
   recordToProduct,
-  useLiveProductsState,
+  useLiveProducts,
 } from "@/hooks/useLiveProducts";
+import { api, type ReviewMedia, type ReviewRecord } from "@/lib/api";
 
 export default function ProductDetail({ productId }: { productId: string }) {
-  const { products: live, ready } = useLiveProductsState();
-  const [resolved, setResolved] = useState<Product | null>(() => {
-    const mock = getProductById(productId);
-    return mock ?? null;
-  });
+  const live = useLiveProducts();
+  const [resolved, setResolved] = useState<Product | null>(null);
+  const [dbReviews, setDbReviews] = useState<ReviewRecord[]>([]);
+  const [reviewAverage, setReviewAverage] = useState<number | null>(null);
 
   useEffect(() => {
     if (!productId) return;
@@ -56,6 +56,57 @@ export default function ProductDetail({ productId }: { productId: string }) {
   }, [productId, live]);
 
   const product = resolved;
+
+  useEffect(() => {
+    if (!product) {
+      setDbReviews([]);
+      setReviewAverage(null);
+      return;
+    }
+    let active = true;
+    const params = new URLSearchParams();
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(productId)) {
+      params.set("productId", productId);
+    }
+    params.set("productName", product.name);
+    api<{ reviews: ReviewRecord[]; summary: { count: number; average: number } }>(
+      `/api/reviews?${params.toString()}`
+    )
+      .then((data) => {
+        if (!active) return;
+        setDbReviews(data.reviews || []);
+        setReviewAverage(data.summary?.count ? data.summary.average : null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setDbReviews([]);
+        setReviewAverage(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [product, productId]);
+
+  const displayReviews = useMemo(() => {
+    if (dbReviews.length > 0) {
+      return dbReviews.map((review) => ({
+        id: review.id,
+        name: review.reviewer_name,
+        rating: review.rating,
+        comment: review.comment ?? "",
+        date: review.created_at,
+        media: review.media ?? [],
+      }));
+    }
+    return (product?.reviews ?? []).map((review, index) => ({
+      id: `mock-${index}`,
+      name: review.name,
+      rating: review.rating,
+      comment: review.comment,
+      date: null as string | null,
+      media: [] as ReviewMedia[],
+    }));
+  }, [dbReviews, product]);
 
   const related = useMemo(() => {
     if (!product) return [];
@@ -83,25 +134,6 @@ export default function ProductDetail({ productId }: { productId: string }) {
   };
 
   if (!product) {
-    if (!ready) {
-      return (
-        <main>
-          <Navbar />
-          <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-            <div className="grid animate-pulse gap-8 lg:grid-cols-2">
-              <div className="aspect-square rounded-2xl bg-slate-200" />
-              <div className="space-y-4">
-                <div className="h-6 w-3/4 rounded bg-slate-200" />
-                <div className="h-5 w-1/3 rounded bg-slate-200" />
-                <div className="h-24 rounded bg-slate-200" />
-                <div className="h-12 w-48 rounded-xl bg-slate-200" />
-              </div>
-            </div>
-          </div>
-          <Footer />
-        </main>
-      );
-    }
     return (
       <main>
         <Navbar />
@@ -158,10 +190,13 @@ export default function ProductDetail({ productId }: { productId: string }) {
             <div className="mt-2 flex items-center gap-2 text-sm text-slate-500">
               <span className="flex items-center gap-1 font-medium text-slate-700">
                 <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                {product.rating ?? 4.9}
+                {reviewAverage ?? product.rating ?? 4.9}
               </span>
               <span>|</span>
-              <span>{product.reviewCount ?? product.sold ?? 0} <ProductDetailText id="product.reviews" /></span>
+              <span>
+                {dbReviews.length > 0 ? dbReviews.length : product.reviewCount ?? product.sold ?? 0}{" "}
+                <ProductDetailText id="product.reviews" />
+              </span>
               <span>|</span>
               <span>{product.soldTotal ?? product.sold ?? 0} <ProductDetailText id="product.sold" /></span>
             </div>
@@ -315,9 +350,9 @@ export default function ProductDetail({ productId }: { productId: string }) {
               <ProductDetailText id="product.buyerReviews" />
             </h2>
             <div className="mt-3 space-y-4">
-              {product.reviews && product.reviews.length > 0 ? (
-                product.reviews.map((review) => (
-                  <div key={review.name} className="border-b border-slate-100 pb-4 last:border-0 last:pb-0">
+              {displayReviews.length > 0 ? (
+                displayReviews.map((review) => (
+                  <div key={review.id} className="border-b border-slate-100 pb-4 last:border-0 last:pb-0">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-semibold text-navy-900">
                         {review.name}
@@ -338,6 +373,40 @@ export default function ProductDetail({ productId }: { productId: string }) {
                     <p className="mt-1 text-sm text-slate-500">
                       <ProductDetailText value={review.comment} />
                     </p>
+                    {review.media.length > 0 ? (
+                      <div className="mt-2 grid grid-cols-3 gap-1.5">
+                        {review.media.map((media, index) =>
+                          media.type === "video" ? (
+                            <video
+                              key={`${media.url}-${index}`}
+                              src={media.url}
+                              controls
+                              playsInline
+                              className="h-20 w-full rounded-lg border border-slate-100 bg-slate-50 object-cover"
+                            />
+                          ) : (
+                            <a
+                              key={`${media.url}-${index}`}
+                              href={media.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block h-20 overflow-hidden rounded-lg border border-slate-100 bg-slate-50"
+                            >
+                              <img src={media.url} alt="" className="h-full w-full object-cover" />
+                            </a>
+                          )
+                        )}
+                      </div>
+                    ) : null}
+                    {review.date ? (
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        {new Date(review.date).toLocaleDateString("id-ID", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </p>
+                    ) : null}
                   </div>
                 ))
               ) : (

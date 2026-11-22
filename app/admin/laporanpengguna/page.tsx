@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   LayoutGrid,
@@ -10,7 +10,6 @@ import {
   Wallet,
   Settings,
   Home,
-  Bell,
   ClipboardList,
   ShieldAlert,
   Hourglass,
@@ -18,6 +17,9 @@ import {
   Eye,
   ChevronDown,
 } from "lucide-react";
+import AdminNotificationBell from "../components/AdminNotificationBell";
+import { api } from "@/lib/api";
+import { markReportsSeen } from "@/lib/adminNotifications";
 import { useLanguage } from "@/lib/i18n";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 
@@ -30,107 +32,60 @@ const navItems = [
   { label: "admin.platformSettings", icon: Settings },
 ];
 
-const stats = [
-  {
-    label: "admin.totalReports",
-    value: "1,248",
-    icon: ClipboardList,
-    iconBg: "bg-blue-50",
-    iconColor: "text-blue-500",
-  },
-  {
-    label: "admin.newReports",
-    value: "42",
-    icon: ShieldAlert,
-    iconBg: "bg-red-50",
-    iconColor: "text-red-500",
-  },
-  {
-    label: "admin.inProgress",
-    value: "18",
-    icon: Hourglass,
-    iconBg: "bg-orange-50",
-    iconColor: "text-orange-500",
-  },
-  {
-    label: "admin.done",
-    value: "1,188",
-    icon: CheckCircle2,
-    iconBg: "bg-blue-50",
-    iconColor: "text-blue-500",
-  },
-];
+type ReportStatus = "pending" | "resolved" | "dismissed";
 
-type StatusType = "Baru" | "Proses" | "Selesai";
-
-const statusStyles: Record<StatusType, string> = {
-  Baru: "bg-red-100 text-red-600",
-  Proses: "bg-orange-100 text-orange-600",
-  Selesai: "bg-blue-100 text-blue-600",
-};
-
-const statusLabels: Record<StatusType, string> = {
-  Baru: "admin.new",
-  Proses: "admin.inProgress",
-  Selesai: "admin.done",
-};
-
-interface Laporan {
+type ReportRecord = {
   id: string;
-  pelapor: string;
-  role: "Buyer" | "Seller";
-  subjek: string;
-  tanggal: string;
-  jam: string;
-  status: StatusType;
-  avatarBg: string;
-}
+  product_name: string;
+  reason: string;
+  status: ReportStatus;
+  created_at: string;
+  reporter: string | null;
+};
 
-const laporanList: Laporan[] = [
-  {
-    id: "#REP-88321",
-    pelapor: "Budi Santoso",
-    role: "Buyer",
-    subjek: "Barang Rusak Saat Diterima",
-    tanggal: "24 Okt 2023",
-    jam: "14:30",
-    status: "Baru",
-    avatarBg: "bg-slate-300",
-  },
-  {
-    id: "#REP-88320",
-    pelapor: "Toko Elektronik Maju",
-    role: "Seller",
-    subjek: "Indikasi Pembeli Fiktif",
-    tanggal: "24 Okt 2023",
-    jam: "10:15",
-    status: "Proses",
-    avatarBg: "bg-slate-300",
-  },
-  {
-    id: "#REP-88315",
-    pelapor: "Andi Wijaya",
-    role: "Buyer",
-    subjek: "Barang Tidak Sesuai Deskripsi",
-    tanggal: "23 Okt 2023",
-    jam: "16:45",
-    status: "Selesai",
-    avatarBg: "bg-slate-300",
-  },
-  {
-    id: "#REP-88310",
-    pelapor: "Sinar Techindo",
-    role: "Seller",
-    subjek: "Kendala Pencairan Dana",
-    tanggal: "23 Okt 2023",
-    jam: "09:20",
-    status: "Selesai",
-    avatarBg: "bg-slate-300",
-  },
-];
+const statusStyles: Record<ReportStatus, string> = {
+  pending: "bg-red-100 text-red-600",
+  resolved: "bg-blue-100 text-blue-600",
+  dismissed: "bg-slate-100 text-slate-500",
+};
+
+const statusKeys: Record<ReportStatus, string> = {
+  pending: "admin.new",
+  resolved: "admin.done",
+  dismissed: "report.statusDismissed",
+};
 
 export default function LaporanPenggunaPage() {
   const { t } = useLanguage();
+  const [reports, setReports] = useState<ReportRecord[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    void api<{ reports: ReportRecord[] }>("/api/reports")
+      .then((data) => {
+        if (!active) return;
+        const list = data.reports || [];
+        setReports(list);
+        markReportsSeen(list.map((report) => report.id));
+      })
+      .catch(() => {
+        if (active) setReports([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const total = reports.length;
+  const pending = reports.filter((report) => report.status === "pending").length;
+  const resolved = reports.filter((report) => report.status === "resolved").length;
+  const stats = [
+    { label: "admin.totalReports", value: total, icon: ClipboardList, iconBg: "bg-blue-50", iconColor: "text-blue-500" },
+    { label: "admin.newReports", value: pending, icon: ShieldAlert, iconBg: "bg-red-50", iconColor: "text-red-500" },
+    { label: "admin.inProgress", value: 0, icon: Hourglass, iconBg: "bg-orange-50", iconColor: "text-orange-500" },
+    { label: "admin.done", value: resolved, icon: CheckCircle2, iconBg: "bg-blue-50", iconColor: "text-blue-500" },
+  ];
+
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans text-slate-800">
       {/* Sidebar */}
@@ -174,7 +129,7 @@ export default function LaporanPenggunaPage() {
           </h2>
           <div className="flex items-center gap-5">
             <LanguageSwitcher variant="light" />
-            <Bell className="h-5 w-5 text-slate-500" />
+            <AdminNotificationBell size={20} className="text-slate-500" />
             <Settings className="h-5 w-5 text-slate-500" />
             <div className="h-8 w-8 overflow-hidden rounded-full bg-slate-300" />
           </div>
@@ -233,47 +188,49 @@ export default function LaporanPenggunaPage() {
                 </tr>
               </thead>
               <tbody>
-                {laporanList.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100 last:border-0">
-                    <td className="px-4 py-4 font-medium text-[#0B1330]">
-                      {row.id}
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`h-9 w-9 flex-shrink-0 rounded-full ${row.avatarBg}`}
-                        />
-                        <div>
-                          <p className="font-medium text-[#0B1330]">
-                            {row.pelapor}
-                          </p>
-                          <p className="text-xs text-slate-400">{row.role}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-slate-600">{row.subjek}</td>
-                    <td className="px-4 py-4 text-slate-500">
-                      {row.tanggal},
-                      <br />
-                      {row.jam}
-                    </td>
-                    <td className="px-4 py-4">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-medium ${statusStyles[row.status]}`}
-                      >
-                        {t(statusLabels[row.status])}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <Eye className="h-4 w-4 cursor-pointer text-slate-500" />
+                {reports.length ? (
+                  reports.map((report) => {
+                    const status: ReportStatus = statusStyles[report.status] ? report.status : "pending";
+                    return (
+                      <tr key={report.id} className="border-b border-slate-100 last:border-0">
+                        <td className="px-4 py-4 font-medium text-[#0B1330]">
+                          #{report.id.slice(0, 8).toUpperCase()}
+                        </td>
+                        <td className="px-4 py-4">{report.reporter || "-"}</td>
+                        <td className="px-4 py-4 text-slate-600">
+                          <span className="font-medium text-[#0B1330]">{report.product_name}</span>
+                          <span className="mt-0.5 block text-xs text-slate-400">{report.reason}</span>
+                        </td>
+                        <td className="px-4 py-4 text-slate-500">
+                          {new Date(report.created_at).toLocaleDateString("id-ID", {
+                            day: "2-digit", month: "short", year: "numeric",
+                          })}
+                        </td>
+                        <td className="px-4 py-4">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-medium ${statusStyles[status]}`}
+                          >
+                            {t(statusKeys[status])}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4">
+                          <Eye className="h-4 w-4 cursor-pointer text-slate-500" />
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400">
+                      {t("report.empty")}
                     </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
 
             <div className="flex items-center justify-between p-4 text-sm text-slate-500">
-              <span>{t("admin.showingReports")}</span>
+              <span>{t("admin.showingReports", { shown: total, total })}</span>
               <div className="flex gap-2">
                 <button
                   disabled
@@ -281,7 +238,10 @@ export default function LaporanPenggunaPage() {
                 >
                   {t("admin.previous")}
                 </button>
-                <button className="rounded-lg bg-[#0B1330] px-4 py-2 text-white">
+                <button
+                  disabled
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-slate-300"
+                >
                   {t("admin.next")}
                 </button>
               </div>

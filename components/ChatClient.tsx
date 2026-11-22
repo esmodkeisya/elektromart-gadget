@@ -97,14 +97,14 @@ export default function ChatClient() {
   useEffect(() => {
     let mounted = true;
     async function bootstrap() {
-      const { data: sessionData } = await supabase.auth.getSession();
+      const { data: userData } = await supabase.auth.getUser();
       if (!mounted) return;
-      if (!sessionData.session?.user) {
+      if (!userData.user) {
         setError(t("profile.sessionNotFoundLogin"));
         setLoading(false);
         return;
       }
-      setMyId(sessionData.session.user.id);
+      setMyId(userData.user.id);
       const list = await refreshConversations();
       if (mounted) {
         const param = new URLSearchParams(window.location.search).get("conversation");

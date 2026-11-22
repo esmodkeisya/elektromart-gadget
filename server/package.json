@@ -11,7 +11,9 @@
     "dbpush": "prisma db push",
     "export:supabase": "node scripts/export-supabase.js",
     "import:mysql": "node scripts/import-mysql.js",
-    "seed": "node scripts/import-mysql.js"
+    "seed": "node scripts/import-mysql.js",
+    "seed:reviews": "node scripts/seed-reviews.js",
+    "seed:flash-sale": "node scripts/seed-flash-sale.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

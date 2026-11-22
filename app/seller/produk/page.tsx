@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { PackagePlus, Pencil, Plus, Trash2 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import Pagination from "../components/Pagination";
+import StockTopUpModal from "../components/StockTopUpModal";
 import { api, type ProductRecord } from "@/lib/api";
-import { useApiData, mutateApi } from "@/hooks/useApiData";
+import { refreshLiveProducts } from "@/hooks/useLiveProducts";
 
 function formatRupiah(value: number) {
   return "Rp " + value.toLocaleString("id-ID");
@@ -30,15 +31,25 @@ function StatusBadge({ status }: { status: ProductRecord["status"] }) {
 
 export default function Products() {
   const [filter, setFilter] = useState("all");
-  const { data, error: loadError } = useApiData<{ products: ProductRecord[] }>("/api/products");
-  const products = data?.products ?? [];
+  const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [topUpProduct, setTopUpProduct] = useState<ProductRecord | null>(null);
   const [error, setError] = useState("");
   const router = useRouter();
   const { t } = useLanguage();
 
   async function load() {
-    await mutateApi("/api/products");
+    try {
+      const data = await api<{ products: ProductRecord[] }>("/api/products");
+      setProducts(data.products || []);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("api.unavailable"));
+    }
   }
+
+  useEffect(() => {
+    void load();
+  }, []);
 
   const filtered = products.filter((p) => {
     if (filter === "active") return p.status === "active";
@@ -58,10 +69,16 @@ export default function Products() {
     if (!window.confirm(t("seller.confirmDeleteProduct"))) return;
     try {
       await api(`/api/products/${id}`, { method: "DELETE" });
+      refreshLiveProducts();
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("api.unavailable"));
     }
+  }
+
+  function handleStockSaved(updated: ProductRecord) {
+    setProducts((current) => current.map((p) => (p.id === updated.id ? updated : p)));
+    setTopUpProduct(null);
   }
 
   return (
@@ -80,7 +97,7 @@ export default function Products() {
             <Plus size={16} /> {t("seller.addProduct")}
           </button>
         </div>
-        {error || loadError ? <p className="mb-4 text-sm text-red-600">{error || loadError?.message}</p> : null}
+        {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
 
         <div className="rounded-2xl bg-white p-5 shadow-card">
           <div className="mb-5 flex flex-wrap items-center gap-2">
@@ -130,12 +147,28 @@ export default function Products() {
                     </td>
                     <td className="px-4 text-seller-ink/80">{p.category}</td>
                     <td className="px-4 font-semibold text-seller-ink">{formatRupiah(p.price)}</td>
-                    <td className={`px-4 ${p.stock === 0 ? "font-semibold text-[#E11D48]" : "text-seller-ink/80"}`}>{p.stock}</td>
+                    <td className={`px-4 ${p.stock < 10 ? "font-semibold text-[#E11D48]" : "text-seller-ink/80"}`}>
+                      {p.stock}
+                      {p.stock < 10 ? (
+                        <span className="ml-1.5 rounded-full bg-[#FDECEC] px-1.5 py-0.5 text-[9px] font-bold">
+                          {t("seller.lowStockShort")}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="px-4">
                       <StatusBadge status={p.status} />
                     </td>
                     <td className="px-4">
                       <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTopUpProduct(p)}
+                          className="text-emerald-600 hover:text-emerald-700"
+                          aria-label={`${t("seller.quickStock")} ${p.name}`}
+                          title={t("seller.quickStock")}
+                        >
+                          <PackagePlus size={16} />
+                        </button>
                         <button type="button" onClick={() => router.push(`/seller/produk/tambahproduk?id=${p.id}`)} className="text-seller-muted hover:text-seller-ink" aria-label={`${t("seller.edit")} ${p.name}`}>
                           <Pencil size={16} />
                         </button>
@@ -153,6 +186,10 @@ export default function Products() {
           <Pagination summary={`${t("seller.showing")} 1-${filtered.length} ${t("of")} ${filtered.length} ${t("seller.products")}`} />
         </div>
       </div>
+
+      {topUpProduct ? (
+        <StockTopUpModal product={topUpProduct} onClose={() => setTopUpProduct(null)} onSaved={handleStockSaved} />
+      ) : null}
     </div>
   );
 }

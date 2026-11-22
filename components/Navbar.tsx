@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -8,7 +8,6 @@ import { Search, MessageCircle, ShoppingCart, Menu, X, Globe, ChevronDown, UserC
 import { supabase } from "@/lib/supabase";
 import { getAllProducts } from "@/lib/data";
 import { useLiveProducts } from "@/hooks/useLiveProducts";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useLanguage } from "@/lib/i18n";
 import { useCart } from "@/lib/CartContext";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
@@ -40,10 +39,13 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [userName, setUserName] = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const [userRole, setUserRole] = useState<"admin" | "seller" | "buyer" | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const pathname = usePathname();
   const router = useRouter();
   const liveProducts = useLiveProducts();
-  const { user, profile } = useCurrentUser();
   const { language, setLanguage, t } = useLanguage();
   const { itemCount } = useCart();
   const [searchQuery, setSearchQuery] = useState("");
@@ -55,21 +57,40 @@ export default function Navbar() {
     { label: t("help"), href: "/bantuan" },
   ];
 
-  const userEmail = user?.email ?? "";
-  const userName = profile?.full_name || user?.user_metadata?.full_name || userEmail.split("@")[0] || "";
-  const avatarUrl = profile?.avatar_url ?? null;
-  const userRole = profile?.role === "admin" || profile?.role === "seller" || profile?.role === "buyer" ? profile.role : null;
-
   const isAdmin = userRole === "admin" || userEmail === "esmodkeisya@gmail.com";
   const accountHref =
     isAdmin ? "/admin/dashboard" : userRole === "seller" ? "/seller/dashboard" : "/profil";
   const accountLabel =
     userRole === "buyer" ? t("profile") : t("dashboard");
 
+  useEffect(() => {
+    let mounted = true;
+    async function loadUser() {
+      const { data } = await supabase.auth.getUser();
+      if (!mounted || !data.user) return;
+      const email = data.user.email ?? "";
+      setUserEmail(email);
+      setUserName(data.user.user_metadata?.full_name || email.split("@")[0] || t("profile"));
+      const { data: profile } = await supabase.from("profiles").select("avatar_url, full_name, role").eq("id", data.user.id).maybeSingle();
+      if (mounted) {
+        setAvatarUrl(profile?.avatar_url ?? null);
+        if (profile?.full_name) setUserName(profile.full_name);
+        setUserRole(profile?.role === "admin" || profile?.role === "seller" || profile?.role === "buyer" ? profile.role : null);
+      }
+    }
+    void loadUser();
+    const { data: listener } = supabase.auth.onAuthStateChange(() => void loadUser());
+    return () => { mounted = false; listener.subscription.unsubscribe(); };
+  }, [language, t]);
+
   async function logout() {
+    await supabase.auth.signOut();
     setProfileOpen(false);
     setMenuOpen(false);
-    await supabase.auth.signOut();
+    setUserName("");
+    setUserEmail("");
+    setUserRole(null);
+    setAvatarUrl(null);
   }
 
   function handleSearch(event: FormEvent) {

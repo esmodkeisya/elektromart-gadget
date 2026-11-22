@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Flag, Loader2 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import { api } from "@/lib/api";
-import { useApiData, mutateApi } from "@/hooks/useApiData";
 import TopBar from "../components/TopBar";
 
 type ReportRecord = {
@@ -36,12 +35,31 @@ const statusStyles: Record<ReportRecord["status"], string> = {
 
 export default function SellerReports() {
   const { t, language } = useLanguage();
-  const { data, error: loadError, isLoading } = useApiData<{ reports: ReportRecord[] }>("/api/reports");
-  const reports = data?.reports ?? [];
+  const [reports, setReports] = useState<ReportRecord[]>([]);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
   const [error, setError] = useState("");
-  const loading = isLoading && !data;
+  const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    void api<{ reports: ReportRecord[] }>("/api/reports")
+      .then((data) => {
+        if (mounted) {
+          setReports(data.reports || []);
+          setError("");
+        }
+      })
+      .catch((err) => {
+        if (mounted) setError(err instanceof Error ? err.message : t("api.unavailable"));
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [t]);
 
   async function setStatus(id: string, status: ReportRecord["status"]) {
     setBusyId(id);
@@ -50,7 +68,7 @@ export default function SellerReports() {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
-      mutateApi("/api/reports");
+      setReports((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
     } catch (err) {
       setError(err instanceof Error ? err.message : t("api.unavailable"));
     } finally {
@@ -85,7 +103,7 @@ export default function SellerReports() {
           </span>
         </div>
 
-        {error || loadError ? <p className="mb-4 text-sm text-red-600">{error || loadError?.message}</p> : null}
+        {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
 
         <div className="mb-6 flex flex-wrap gap-2">
           {FILTERS.map((f) => (

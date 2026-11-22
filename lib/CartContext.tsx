@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { PackingType, ShippingBreakdown } from "@/lib/shipping";
 
 export type CartItem = {
   id: string;
@@ -12,6 +13,10 @@ export type CartItem = {
   stock: number;
   category?: string;
   badge?: string;
+  weightKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
 };
 
 export type CheckoutDetail = {
@@ -27,6 +32,13 @@ export type CheckoutDetail = {
   courier: string;
   address: string;
   city: string;
+  shippingZone?: string | null;
+  shippingRegion?: string | null;
+  packingType?: PackingType;
+  packingFee?: number;
+  distanceKm?: number;
+  insuranceSelected?: boolean;
+  shippingBreakdown?: ShippingBreakdown | null;
   createdAt: number;
   expiresAt: number;
   status: "MENUNGGU PEMBAYARAN";
@@ -42,6 +54,7 @@ type CartContextValue = {
   clearCart: () => void;
   checkoutDetail: CheckoutDetail | null;
   setCheckoutDetail: (detail: CheckoutDetail | null) => void;
+  hydrated: boolean;
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -119,6 +132,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         clearCart,
         checkoutDetail,
         setCheckoutDetail: setCheckoutDetailState,
+        hydrated,
       }}
     >
       {children}

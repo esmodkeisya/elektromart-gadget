@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ImagePlus, Plus, RefreshCw, X } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import { api, type CategoryRecord, type ProductRecord } from "@/lib/api";
+import { refreshLiveProducts } from "@/hooks/useLiveProducts";
 import { supabase } from "@/lib/supabase";
 
 const EXTRA_SLOTS = 3;
@@ -22,6 +23,10 @@ export default function AddProduct() {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
   const [stock, setStock] = useState("");
+  const [weightKg, setWeightKg] = useState("1");
+  const [lengthCm, setLengthCm] = useState("20");
+  const [widthCm, setWidthCm] = useState("15");
+  const [heightCm, setHeightCm] = useState("10");
   const [sku, setSku] = useState("");
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
   const [mainImage, setMainImage] = useState<string | null>(null);
@@ -48,6 +53,10 @@ export default function AddProduct() {
           setDescription(item.description || "");
           setPrice(String(item.price || ""));
           setStock(String(item.stock || ""));
+          setWeightKg(String(item.weight_kg || 1));
+          setLengthCm(String(item.length_cm || 20));
+          setWidthCm(String(item.width_cm || 15));
+          setHeightCm(String(item.height_cm || 10));
           setSku(item.sku || "");
           setMainImage(item.image_url);
           const rest = (item.images ?? []).slice(1);
@@ -140,6 +149,10 @@ export default function AddProduct() {
       description,
       price: numericPrice,
       stock: numericStock,
+      weight_kg: Number(weightKg) || 1,
+      length_cm: Number(lengthCm) || 20,
+      width_cm: Number(widthCm) || 15,
+      height_cm: Number(heightCm) || 10,
       sku,
       image_url: mainImage || null,
       images,
@@ -150,6 +163,7 @@ export default function AddProduct() {
       } else {
         await api("/api/products", { method: "POST", body: JSON.stringify(payload) });
       }
+      refreshLiveProducts();
       router.push("/seller/produk");
     } catch (err) {
       setError(err instanceof Error ? err.message : t("api.unavailable"));
@@ -263,6 +277,29 @@ export default function AddProduct() {
                   placeholder="0"
                   className={fieldClass}
                 />
+              </div>
+            </div>
+
+            <div className="mb-5 rounded-xl border border-[#EEF1F6] bg-[#F8FAFC] p-4">
+              <p className="mb-1 text-sm font-semibold text-seller-ink">{t("seller.shippingDimensions")}</p>
+              <p className="mb-4 text-xs text-seller-muted">{t("seller.shippingDimensionsHint")}</p>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-seller-ink">{t("seller.weightKg")}</label>
+                  <input type="number" min="0.1" step="0.1" value={weightKg} onChange={(e) => setWeightKg(e.target.value)} className={fieldClass} />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-seller-ink">{t("seller.lengthCm")}</label>
+                  <input type="number" min="1" step="1" value={lengthCm} onChange={(e) => setLengthCm(e.target.value)} className={fieldClass} />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-seller-ink">{t("seller.widthCm")}</label>
+                  <input type="number" min="1" step="1" value={widthCm} onChange={(e) => setWidthCm(e.target.value)} className={fieldClass} />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-seller-ink">{t("seller.heightCm")}</label>
+                  <input type="number" min="1" step="1" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} className={fieldClass} />
+                </div>
               </div>
             </div>
 

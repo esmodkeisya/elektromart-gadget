@@ -22,16 +22,22 @@ import {
   ShieldCheck,
   Store,
   Trash2,
+  Truck,
   User,
   Building2,
   Wallet,
   X,
+  Star,
+  MessageSquare,
+  Send,
+  ImagePlus,
+  Play,
+  HandCoins,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { supabase } from "@/lib/supabase";
-import { api, PROVINCES, type OrderRecord, type ShippingAddress } from "@/lib/api";
-import { useApiData, mutateApi } from "@/hooks/useApiData";
+import { api, PROVINCES, type OrderItemRecord, type OrderRecord, type ReviewMedia, type ShippingAddress } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 
 type Profile = {
@@ -51,7 +57,19 @@ type BankAccount = {
   account_number: string;
 };
 
+type PlatformPayoutRecord = {
+  id: string;
+  recipient_role: "seller" | "buyer";
+  amount: number;
+  status: string;
+  note: string | null;
+  created_at: string;
+};
+
 const NAMED_CHANNELS = ["BCA OneKlik", "BRI Direct Debit", "SeaBank Bayar Instan", "OCTO Cash by CIMB Niaga"];
+
+const REVIEW_MEDIA_LIMIT = 5;
+const REVIEW_MEDIA_MAX_BYTES = 15 * 1024 * 1024;
 
 const emptyProfile: Profile = {
   full_name: "",
@@ -75,7 +93,7 @@ const emptyAddress = {
   is_default: false,
 };
 
-type Section = "profil" | "bank" | "alamat" | "password" | "pesanan";
+type Section = "profil" | "bank" | "alamat" | "password" | "pesanan" | "refunds";
 
 type RegisteringBank = {
   mode: "card" | "account";
@@ -113,14 +131,6 @@ function formatDate(iso: string) {
 export default function BuyerProfilPage() {
   const { t } = useLanguage();
   const [section, setSection] = useState<Section>("profil");
-  const { data: sessionData, error: sessionError } = useApiData<{ user: { id: string; email?: string } | null }>("/api/auth/user");
-  const userId = sessionData?.user?.id ?? null;
-  const { data: profileRes, error: profileError } = useApiData<{ data: (Partial<Profile> & { username?: string | null }) | null }>(
-    userId ? `/api/profiles?id=${userId}` : null
-  );
-  const { data: addressesRes } = useApiData<{ addresses: ShippingAddress[] }>(userId ? "/api/addresses" : null);
-  const { data: accountsRes } = useApiData<{ accounts: BankAccount[] }>(userId ? "/api/bank-accounts" : null);
-  const { data: ordersRes, error: ordersError } = useApiData<{ orders: OrderRecord[] }>(userId ? "/api/orders" : null);
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -149,6 +159,18 @@ export default function BuyerProfilPage() {
   const [orderActionMsg, setOrderActionMsg] = useState("");
   const [orderActionErr, setOrderActionErr] = useState("");
 
+  const [reviewTarget, setReviewTarget] = useState<{ order: OrderRecord; item: OrderItemRecord } | null>(null);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewMedia, setReviewMedia] = useState<ReviewMedia[]>([]);
+  const [reviewUploading, setReviewUploading] = useState(false);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+
+  const [payouts, setPayouts] = useState<PlatformPayoutRecord[]>([]);
+  const [payoutsLoaded, setPayoutsLoaded] = useState(false);
+  const [payoutsLoading, setPayoutsLoading] = useState(false);
+
   function labelText(label: string) {
     if (label === "office") return t("profile.labelOffice");
     if (label === "other") return t("profile.labelOther");
@@ -156,15 +178,33 @@ export default function BuyerProfilPage() {
   }
 
   async function loadAddresses() {
-    await mutateApi("/api/addresses");
+    const data = await api<{ addresses: ShippingAddress[] }>("/api/addresses");
+    setAddresses(data.addresses || []);
   }
 
   async function loadBankAccounts() {
-    await mutateApi("/api/bank-accounts");
+    const data = await api<{ accounts: BankAccount[] }>("/api/bank-accounts");
+    setAccounts(data.accounts || []);
   }
 
   async function loadOrders() {
-    await mutateApi("/api/orders");
+    const data = await api<{ orders: OrderRecord[] }>("/api/orders");
+    setOrders(data.orders || []);
+    setOrdersLoaded(true);
+  }
+
+  async function loadPayouts() {
+    setPayoutsLoading(true);
+    try {
+      const data = await api<{ payouts: PlatformPayoutRecord[] }>("/api/finance/payouts");
+      setPayouts(data.payouts || []);
+      setPayoutsLoaded(true);
+    } catch {
+      setPayouts([]);
+      setPayoutsLoaded(true);
+    } finally {
+      setPayoutsLoading(false);
+    }
   }
 
   async function completeOrder(orderId: string) {
@@ -176,7 +216,7 @@ export default function BuyerProfilPage() {
         method: "PATCH",
         body: JSON.stringify({ status: "completed" }),
       });
-      mutateApi("/api/orders");
+      await loadOrders();
       setOrderActionMsg(t("profile.orderCompletedSuccess"));
     } catch (err) {
       setOrderActionErr(err instanceof Error ? err.message : t("profile.orderActionFailed"));
@@ -185,46 +225,151 @@ export default function BuyerProfilPage() {
     }
   }
 
-  useEffect(() => {
-    if (sessionData) {
-      setEmail(sessionData.user?.email ?? "");
-      if (sessionData.user?.email) setUsername(sessionData.user.email.split("@")[0]);
+  function openReview(order: OrderRecord, item: OrderItemRecord) {
+    setReviewTarget({ order, item });
+    setReviewRating(5);
+    setReviewComment("");
+    setReviewMedia([]);
+    setReviewError("");
+  }
+
+  function closeReview() {
+    if (reviewSaving || reviewUploading) return;
+    setReviewTarget(null);
+    setReviewComment("");
+    setReviewMedia([]);
+    setReviewError("");
+  }
+
+  function removeReviewMedia(url: string) {
+    setReviewMedia((prev) => prev.filter((media) => media.url !== url));
+  }
+
+  async function handleReviewMediaChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+
+    setReviewError("");
+    setReviewUploading(true);
+    try {
+      const next = [...reviewMedia];
+
+      for (const file of files) {
+        if (next.length >= REVIEW_MEDIA_LIMIT) {
+          setReviewError(t("profile.reviewMediaLimit"));
+          break;
+        }
+
+        const isVideo = file.type.startsWith("video/");
+        const isImage = file.type.startsWith("image/");
+        if (!isVideo && !isImage) {
+          setReviewError(t("profile.reviewMediaType"));
+          continue;
+        }
+        if (file.size > REVIEW_MEDIA_MAX_BYTES) {
+          setReviewError(t("profile.reviewMediaSize"));
+          continue;
+        }
+        if (isVideo && next.some((media) => media.type === "video")) {
+          setReviewError(t("profile.reviewMediaOneVideo"));
+          continue;
+        }
+
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80);
+        const uploadPath = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+        const { data, error: uploadError } = await supabase.storage
+          .from("reviews")
+          .upload(uploadPath, file, { contentType: file.type });
+
+        if (uploadError || !data) {
+          setReviewError(uploadError?.message || t("profile.reviewUploadFailed"));
+          continue;
+        }
+
+        next.push({
+          type: isVideo ? "video" : "image",
+          url: data.publicUrl || data.path,
+        });
+      }
+
+      setReviewMedia(next);
+    } finally {
+      setReviewUploading(false);
     }
-  }, [sessionData]);
+  }
 
-  useEffect(() => {
-    if (!profileRes?.data) return;
-    const data = profileRes.data;
-    setProfile({
-      ...emptyProfile,
-      ...data,
-      date_of_birth: data.date_of_birth || "",
-      gender: data.gender || "",
-    });
-    if (data.username) setUsername(data.username);
-  }, [profileRes]);
-
-  useEffect(() => {
-    if (addressesRes) setAddresses(addressesRes.addresses || []);
-  }, [addressesRes]);
-
-  useEffect(() => {
-    if (accountsRes) setAccounts(accountsRes.accounts || []);
-  }, [accountsRes]);
-
-  useEffect(() => {
-    if (ordersRes) {
-      setOrders(ordersRes.orders || []);
-      setOrdersLoaded(true);
+  async function submitReview(event: FormEvent) {
+    event.preventDefault();
+    if (!reviewTarget || reviewUploading) return;
+    setReviewSaving(true);
+    setReviewError("");
+    setOrderActionMsg("");
+    setOrderActionErr("");
+    try {
+      await api<{ review: unknown }>("/api/reviews", {
+        method: "POST",
+        body: JSON.stringify({
+          order_id: reviewTarget.order.id,
+          order_item_id: reviewTarget.item.id,
+          rating: reviewRating,
+          comment: reviewComment,
+          media: reviewMedia,
+        }),
+      });
+      setReviewTarget(null);
+      setReviewComment("");
+      setReviewMedia([]);
+      await loadOrders();
+      setOrderActionMsg(t("profile.reviewSuccess"));
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : t("profile.reviewFailed"));
+    } finally {
+      setReviewSaving(false);
     }
-  }, [ordersRes]);
+  }
 
   useEffect(() => {
-    if (sessionError || profileError) {
-      setError((sessionError ?? profileError)?.message || t("profile.sessionNotFoundLogin"));
+    let mounted = true;
+    async function loadProfile() {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        setError(t("profile.sessionNotFoundLogin"));
+        setLoading(false);
+        return;
+      }
+      setEmail(userData.user.email ?? "");
+      setUsername(userData.user.email?.split("@")[0] ?? "");
+      const { data, error: profileError } = await supabase
+        .from("profiles")
+        .select("full_name, phone, avatar_url, role, username, date_of_birth, gender")
+        .eq("id", userData.user.id)
+        .maybeSingle();
+      if (!mounted) return;
+      if (profileError) setError(profileError.message);
+      if (data) {
+        setProfile({
+          ...emptyProfile,
+          ...data,
+          date_of_birth: data.date_of_birth || "",
+          gender: data.gender || "",
+        });
+        if (data.username) setUsername(data.username);
+      }
+      try {
+        await loadAddresses();
+        await loadBankAccounts();
+        await loadOrders();
+      } catch (err) {
+        if (mounted) setError(err instanceof Error ? err.message : t("api.unavailable"));
+      }
+      if (mounted) setLoading(false);
     }
-    if (sessionData || sessionError) setLoading(false);
-  }, [sessionData, sessionError, profileError, t]);
+    void loadProfile();
+    return () => {
+      mounted = false;
+    };
+  }, [t]);
 
   function updateField(field: keyof Profile, value: string) {
     setProfile((current) => ({ ...current, [field]: value }));
@@ -526,6 +671,7 @@ export default function BuyerProfilPage() {
     alamat: t("profile.addressTab"),
     password: t("profile.changePassword"),
     pesanan: t("profile.myOrders"),
+    refunds: t("profile.refunds"),
   };
 
   return (
@@ -583,6 +729,9 @@ export default function BuyerProfilPage() {
 
               <div className="my-4 border-t border-slate-100" />
               <SidebarItem active={section === "pesanan"} onClick={() => { setSection("pesanan"); resetMessage(); }} icon={Package} label={t("profile.myOrders")} />
+              <div className="mt-1">
+                <SidebarItem active={section === "refunds"} onClick={() => { setSection("refunds"); resetMessage(); void loadPayouts(); }} icon={HandCoins} label={t("profile.refunds")} />
+              </div>
             </aside>
 
             <div>
@@ -922,6 +1071,28 @@ export default function BuyerProfilPage() {
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-semibold text-navy-900">{item.product_name}</p>
                                 <p className="text-xs text-slate-400">{formatRupiah(item.price)} × {item.qty}</p>
+                                {order.status === "completed" ? (
+                                  item.review ? (
+                                    <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#16A34A]">
+                                      <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                                      {t("profile.reviewGiven")} · {item.review.rating}/5
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => openReview(order, item)}
+                                      className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-blue hover:underline"
+                                    >
+                                      <MessageSquare className="h-3 w-3" />
+                                      {t("profile.giveReview")}
+                                    </button>
+                                  )
+                                ) : order.status === "shipped" ? (
+                                  <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-400">
+                                    <Lock className="h-3 w-3" />
+                                    {t("profile.reviewUnlockHint")}
+                                  </span>
+                                ) : null}
                               </div>
                               <span className="text-sm font-semibold text-navy-900">{formatRupiah(item.subtotal)}</span>
                             </li>
@@ -937,6 +1108,15 @@ export default function BuyerProfilPage() {
                             {t("profile.orderTotal")}:{" "}
                             <span className="ml-1 text-sm font-bold text-navy-900">{formatRupiah(order.total)}</span>
                           </span>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3">
+                          <Link
+                            href={`/lacak/${order.id}`}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-navy-900 hover:bg-slate-50"
+                          >
+                            <Truck className="h-3.5 w-3.5" /> {t("lacakPesanan")}
+                          </Link>
                         </div>
 
                         {order.status === "shipped" ? (
@@ -968,10 +1148,171 @@ export default function BuyerProfilPage() {
                   })}
                 </div>
               ) : null}
+
+              {section === "refunds" ? (
+                <div className="space-y-4">
+                  <div>
+                    <h2 className="text-base font-bold text-navy-900">{t("profile.refunds")}</h2>
+                    <p className="mt-0.5 text-xs text-slate-500">{t("profile.refundsDesc")}</p>
+                  </div>
+
+                  {payoutsLoading ? (
+                    <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-100 bg-white py-10 text-sm text-slate-400 shadow-card">
+                      <Loader2 className="h-4 w-4 animate-spin" /> {t("profile.processing")}
+                    </div>
+                  ) : payoutsLoaded && payouts.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center shadow-card">
+                      <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-50">
+                        <HandCoins className="h-7 w-7 text-slate-300" />
+                      </span>
+                      <p className="mt-4 text-sm font-semibold text-navy-900">{t("profile.refundEmpty")}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {payouts.map((row) => (
+                        <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white px-5 py-4 shadow-card">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-navy-900">{formatRupiah(row.amount)}</p>
+                            <p className="mt-0.5 text-xs text-slate-500">{row.note || t("profile.refundDefaultNote")}</p>
+                            <p className="mt-0.5 text-[11px] text-slate-400">{formatDate(row.created_at)}</p>
+                          </div>
+                          <span className="rounded-full bg-[#E9F8EF] px-3 py-1 text-[11px] font-bold text-[#16A34A]">
+                            {t("profile.refundReceived")}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         )}
       </div>
+
+      {reviewTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 px-4" role="dialog" aria-modal="true">
+          <form onSubmit={submitReview} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-brand-blue" />
+                <h3 className="text-sm font-bold text-navy-900">{t("profile.reviewTitle")}</h3>
+              </div>
+              <button type="button" onClick={closeReview} className="text-slate-400 hover:text-navy-900" aria-label={t("profile.reviewCancel")}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
+              <p className="text-xs text-slate-400">{t("profile.reviewProduct")}</p>
+              <p className="mt-0.5 text-sm font-semibold text-navy-900">{reviewTarget.item.product_name}</p>
+            </div>
+
+            <div className="mt-4">
+              <p className="text-xs font-medium text-slate-600">{t("profile.reviewRating")}</p>
+              <div className="mt-2 flex items-center gap-1.5">
+                {[1, 2, 3, 4, 5].map((rating) => (
+                  <button
+                    key={rating}
+                    type="button"
+                    onClick={() => setReviewRating(rating)}
+                    aria-label={`${rating}/5`}
+                    className="rounded-md p-0.5 transition hover:scale-110"
+                  >
+                    <Star
+                      className={`h-7 w-7 ${
+                        rating <= reviewRating
+                          ? "fill-amber-400 text-amber-400"
+                          : "text-slate-200"
+                      }`}
+                    />
+                  </button>
+                ))}
+                <span className="ml-1 text-sm font-semibold text-navy-900">{reviewRating}/5</span>
+              </div>
+            </div>
+
+            <label className="mt-4 block">
+              <span className="mb-1.5 block text-xs font-medium text-slate-600">{t("profile.reviewComment")}</span>
+              <textarea
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                rows={4}
+                maxLength={2000}
+                placeholder={t("profile.reviewCommentPlaceholder")}
+                className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/10"
+              />
+            </label>
+
+            <div className="mt-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-600">{t("profile.reviewMedia")}</span>
+                <span className="text-[11px] text-slate-400">{reviewMedia.length}/{REVIEW_MEDIA_LIMIT}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {reviewMedia.map((media) => (
+                  <div key={media.url} className="relative h-20 w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                    {media.type === "video" ? (
+                      <video src={media.url} className="h-full w-full object-cover" muted playsInline />
+                    ) : (
+                      <img src={media.url} alt="" className="h-full w-full object-cover" />
+                    )}
+                    {media.type === "video" ? (
+                      <Play className="absolute bottom-1 left-1 h-3.5 w-3.5 fill-white text-white drop-shadow" />
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => removeReviewMedia(media.url)}
+                      aria-label={t("profile.reviewRemoveMedia")}
+                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-navy-900/70 text-white hover:bg-navy-900"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                {reviewMedia.length < REVIEW_MEDIA_LIMIT ? (
+                  <label className="flex h-20 w-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-1 text-center text-[10px] font-semibold text-slate-500 transition hover:border-brand-blue hover:text-brand-blue">
+                    {reviewUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
+                    <span>{reviewUploading ? t("profile.reviewUploading") : t("profile.reviewAddMedia")}</span>
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      multiple
+                      onChange={handleReviewMediaChange}
+                      className="hidden"
+                      disabled={reviewUploading}
+                    />
+                  </label>
+                ) : null}
+              </div>
+              <p className="mt-1.5 text-[11px] text-slate-400">{t("profile.reviewMediaHint")}</p>
+            </div>
+
+            {reviewError ? (
+              <p className="mt-3 rounded-lg bg-[#FDECEC] px-3 py-2 text-sm font-medium text-[#E11D48]">{reviewError}</p>
+            ) : null}
+
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={closeReview}
+                disabled={reviewSaving || reviewUploading}
+                className="flex-1 rounded-lg border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {t("profile.reviewCancel")}
+              </button>
+              <button
+                type="submit"
+                disabled={reviewSaving || reviewUploading}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {reviewSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {reviewSaving ? t("profile.reviewSaving") : t("profile.reviewSubmit")}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {registering ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 px-4" role="dialog" aria-modal="true">

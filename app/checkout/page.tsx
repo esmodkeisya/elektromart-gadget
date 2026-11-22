@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -23,6 +23,14 @@ import Footer from "@/components/Footer";
 import { useCart, type CheckoutDetail } from "@/lib/CartContext";
 import { formatRupiah } from "@/lib/data";
 import { api, PROVINCES, type OrderRecord, type ShippingAddress } from "@/lib/api";
+import {
+  SHIPPING_SERVICES,
+  quoteShipping,
+  type PackingType,
+  type ShippingQuoteItem,
+  type ShippingService,
+} from "@/lib/shipping";
+import ShippingBreakdownPanel from "@/components/checkout/ShippingBreakdown";
 import { useLanguage } from "@/lib/i18n";
 
 type Courier = {
@@ -30,16 +38,10 @@ type Courier = {
   eta: string;
   price: number;
   logo: string;
-  badgeKey?: string | null;
+  badgeKey: string | null;
+  formulaKey: string;
+  mode: ShippingService["mode"];
 };
-
-const courierDefs = [
-  { name: "JNE Reguler", etaKey: "checkout.etaDays", price: 25000, logo: "/logos/jne.png", badgeKey: "checkout.badgePopular" },
-  { name: "J&T Express", etaKey: "checkout.etaDays", price: 22000, logo: "/logos/jnt.svg", badgeKey: null },
-  { name: "SiCepat REG", etaKey: "checkout.etaFast", price: 26000, logo: "/logos/sicepat.png", badgeKey: null },
-  { name: "AnterAja", etaKey: "checkout.etaDays", price: 21000, logo: "/logos/anteraja.jpg", badgeKey: "checkout.badgeCheapest" },
-  { name: "GoSend Same Day", etaKey: "checkout.etaToday", price: 35000, logo: "/logos/gosend.png", badgeKey: null },
-];
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -77,14 +79,6 @@ export default function CheckoutPage() {
       methods: [{ name: "QRIS", short: "QRIS", logo: "/logos/qris.svg", badgeKey: "checkout.badgePopular" }],
     },
   ];
-  const couriers: Courier[] = courierDefs.map((c) => ({
-    name: c.name,
-    eta: t(c.etaKey),
-    price: c.price,
-    logo: c.logo,
-    badgeKey: c.badgeKey ? t(c.badgeKey) : null,
-  }));
-
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
@@ -93,7 +87,10 @@ export default function CheckoutPage() {
   const [postal, setPostal] = useState("");
   const [currentLocation, setCurrentLocation] = useState(false);
   const [notes, setNotes] = useState("");
-  const [selectedCourier, setSelectedCourier] = useState<Courier | null>(null);
+  const [selectedCourierName, setSelectedCourierName] = useState<string>(SHIPPING_SERVICES[0].name);
+  const [insuranceSelected, setInsuranceSelected] = useState(true);
+  const [packingType, setPackingType] = useState<PackingType>("none");
+  const [distanceKm, setDistanceKm] = useState("10");
   const [paymentGroup, setPaymentGroup] = useState<"bank" | "ewallet" | "qris">("bank");
   const [selectedMethod, setSelectedMethod] = useState<string>("BCA Virtual Account");
 
@@ -101,6 +98,7 @@ export default function CheckoutPage() {
   const [agree, setAgree] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [savedAddresses, setSavedAddresses] = useState<ShippingAddress[]>([]);
 
   useEffect(() => {
@@ -121,10 +119,70 @@ export default function CheckoutPage() {
       .catch(() => undefined);
   }, []);
 
-  const productFee = items.reduce((acc, i) => acc + Math.round(i.price * 0.014), 0);
-  const insuranceFee = items.reduce((acc, i) => acc + Math.min(5000, Math.max(2000, Math.round(i.price * i.qty * 0.002))), 0);
-  const shippingFee = selectedCourier?.price ?? 0;
-  const total = subtotal + productFee + insuranceFee + shippingFee;
+  const quoteItems = useMemo<ShippingQuoteItem[]>(
+    () =>
+      items.map((item) => ({
+        qty: item.qty,
+        price: item.price,
+        weightKg: item.weightKg || 1,
+        lengthCm: item.lengthCm || 20,
+        widthCm: item.widthCm || 15,
+        heightCm: item.heightCm || 10,
+      })),
+    [items]
+  );
+
+  const etaKeyFor = (service: ShippingService) => {
+    if (service.mode === "instant") return "checkout.etaToday";
+    if (service.mode === "cargo") return "checkout.etaCargo";
+    if (service.name === "SiCepat REG") return "checkout.etaFast";
+    if (service.name === "DHL Express" || service.name === "FedEx International") return "checkout.etaInternational";
+    return "checkout.etaDays";
+  };
+
+  const couriers: Courier[] = useMemo(
+    () =>
+      SHIPPING_SERVICES.map((service) => ({
+        name: service.name,
+        eta: t(etaKeyFor(service)),
+        price: quoteShipping({
+          service: service.name,
+          province,
+          items: quoteItems,
+          insuranceEnabled: false,
+          packingType: "none",
+        }).baseFee,
+        logo: service.logo,
+        badgeKey: service.badge ? t(service.badge) : null,
+        formulaKey: service.formulaKey,
+        mode: service.mode,
+      })),
+    [province, quoteItems, t]
+  );
+
+  const selectedCourier = useMemo(
+    () => couriers.find((courier) => courier.name === selectedCourierName) ?? couriers[0],
+    [couriers, selectedCourierName]
+  );
+
+  const quote = useMemo(
+    () =>
+      quoteShipping({
+        service: selectedCourierName,
+        province,
+        items: quoteItems,
+        insuranceEnabled: insuranceSelected,
+        packingType,
+        distanceKm: Number(distanceKm) || 0,
+      }),
+    [selectedCourierName, province, quoteItems, insuranceSelected, packingType, distanceKm]
+  );
+
+  const zone = quote.zone;
+  const shippingFee = quote.baseFee;
+  const insuranceFee = quote.insuranceFee;
+  const packingFee = quote.packingFee;
+  const total = subtotal + shippingFee + insuranceFee + packingFee;
 
   const activePayment =
     paymentGroups
@@ -158,6 +216,8 @@ export default function CheckoutPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    // Guard against double submit (double click / Enter) creating two orders.
+    if (submittingRef.current) return;
     setError("");
 
     if (!name.trim() || !phone.trim() || !address.trim() || !city.trim()) {
@@ -177,6 +237,7 @@ export default function CheckoutPage() {
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const { order } = await api<{ order: OrderRecord }>("/api/orders", {
@@ -186,15 +247,12 @@ export default function CheckoutPage() {
             product_id: i.id,
             product_name: i.name,
             product_image: i.image,
-            price: i.price,
             qty: i.qty,
           })),
-          subtotal,
-          product_fee: productFee,
-          insurance_fee: insuranceFee,
-          shipping_fee: shippingFee,
-          total,
           courier: selectedCourier.name,
+          insurance_selected: insuranceSelected,
+          packing_type: packingType,
+          distance_km: Number(distanceKm) || 0,
           payment_method: activePayment.name,
           payment_group: paymentGroup,
           address: {
@@ -212,15 +270,22 @@ export default function CheckoutPage() {
         orderId: order.order_number,
         orderDbId: order.id,
         items,
-        subtotal,
-        shippingFee,
-        insuranceFee,
-        total,
+        subtotal: Number(order.subtotal || subtotal),
+        shippingFee: Number(order.shipping_fee || shippingFee),
+        insuranceFee: Number(order.insurance_fee || insuranceFee),
+        total: Number(order.total || total),
         paymentMethod: activePayment.name,
         paymentGroup,
         courier: selectedCourier.name,
         address: `${address}, ${city}, ${province} ${postal}`,
         city,
+        shippingZone: order.shipping_zone || zone.code,
+        shippingRegion: order.shipping_region || zone.island,
+        packingType: order.packing_type || packingType,
+        packingFee: Number(order.packing_fee || packingFee),
+        distanceKm: Number(order.distance_km ?? distanceKm),
+        insuranceSelected: order.insurance_selected ?? insuranceSelected,
+        shippingBreakdown: order.shipping_breakdown || quote,
         createdAt: Date.now(),
         expiresAt: Date.now() + 24 * 60 * 60 * 1000,
         status: "MENUNGGU PEMBAYARAN",
@@ -229,6 +294,7 @@ export default function CheckoutPage() {
       setCheckoutDetail(detail);
       router.push("/pembayaran");
     } catch (err) {
+      submittingRef.current = false;
       setError(err instanceof Error ? err.message : t("checkout.errorCreateOrder"));
     } finally {
       setSubmitting(false);
@@ -377,6 +443,18 @@ export default function CheckoutPage() {
                 <h2 className="text-sm font-semibold text-navy-900">{t("checkout.shippingService")}</h2>
               </header>
               <div className="p-5">
+                <div
+                  className={`mb-4 flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs ${
+                    zone.isJava ? "bg-blue-50 text-brand-blue" : "bg-amber-50 text-amber-700"
+                  }`}
+                >
+                  <Truck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {zone.isJava
+                      ? t("checkout.shippingZoneJava")
+                      : t("checkout.shippingZoneOutside", { island: zone.island })}
+                  </span>
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {couriers.map((courier) => {
                     const active = selectedCourier?.name === courier.name;
@@ -384,7 +462,7 @@ export default function CheckoutPage() {
                       <button
                         key={courier.name}
                         type="button"
-                        onClick={() => setSelectedCourier(courier)}
+                        onClick={() => setSelectedCourierName(courier.name)}
                         className={`flex items-center gap-3 rounded-xl border p-3.5 text-left transition-all ${
                           active
                             ? "border-brand-blue bg-blue-50/60 ring-1 ring-brand-blue"
@@ -396,7 +474,13 @@ export default function CheckoutPage() {
                             active ? "border-brand-blue/40" : "border-slate-200"
                           }`}
                         >
-                          <img src={courier.logo} alt={courier.name} className="h-full w-full object-contain" />
+                          {courier.logo ? (
+                            <img src={courier.logo} alt={courier.name} className="h-full w-full object-contain" />
+                          ) : (
+                            <span className="text-[10px] font-bold tracking-wide text-slate-500">
+                              {courier.name.slice(0, 3).toUpperCase()}
+                            </span>
+                          )}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-semibold text-navy-900">
@@ -404,6 +488,9 @@ export default function CheckoutPage() {
                           </span>
                           <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
                             <Clock className="h-3 w-3" /> {courier.eta}
+                          </span>
+                          <span className="mt-0.5 block truncate text-[10px] text-slate-400">
+                            {t(courier.formulaKey)}
                           </span>
                         </span>
                         <span className="flex flex-col items-end gap-1">
@@ -423,6 +510,63 @@ export default function CheckoutPage() {
                     );
                   })}
                 </div>
+
+                <div className="mt-5 grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 p-3.5">
+                    <label className="flex items-start gap-2.5 text-sm text-navy-900">
+                      <input
+                        type="checkbox"
+                        checked={insuranceSelected}
+                        onChange={(e) => setInsuranceSelected(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-brand-blue"
+                      />
+                      <span>
+                        <span className="flex items-center gap-1.5 font-semibold">
+                          <ShieldCheck className="h-4 w-4 text-emerald-500" /> {t("checkout.insurance")}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-slate-500">{t("checkout.insuranceHint")}</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 p-3.5">
+                    <label className="mb-1.5 block text-xs font-semibold text-navy-900">
+                      {t("checkout.packing")}
+                    </label>
+                    <select
+                      value={packingType}
+                      onChange={(e) => setPackingType(e.target.value as PackingType)}
+                      className="input-em"
+                    >
+                      <option value="none">{t("checkout.packingNone")}</option>
+                      <option value="bubble">{t("checkout.packingBubble")}</option>
+                      <option value="wood">{t("checkout.packingWood")}</option>
+                    </select>
+                    <p className="mt-1.5 text-xs text-slate-500">{t("checkout.packingHint")}</p>
+                  </div>
+
+                  {selectedCourier?.mode === "instant" ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 sm:col-span-2">
+                      <label className="mb-1.5 block text-xs font-semibold text-amber-900">
+                        {t("checkout.distance")}
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.1"
+                          value={distanceKm}
+                          onChange={(e) => setDistanceKm(e.target.value)}
+                          className="input-em max-w-40"
+                        />
+                        <span className="text-xs text-amber-800">{t("checkout.kmValue", { value: "" }).trim()}</span>
+                      </div>
+                      <p className="mt-1.5 text-xs text-amber-700">{t("checkout.distanceHint")}</p>
+                    </div>
+                  ) : null}
+                </div>
+
+                <ShippingBreakdownPanel breakdown={quote} className="mt-4" />
               </div>
             </section>
 
@@ -572,13 +716,17 @@ export default function CheckoutPage() {
 
               <div className="border-t border-slate-100 px-5 pt-4 text-sm">
                 <SummaryRow label={t("pay.subtotal")} value={formatRupiah(subtotal)} />
-                <SummaryRow label={t("cart.productServiceFee")} value={formatRupiah(productFee)} />
-                <SummaryRow label={t("checkout.insurance")} value={formatRupiah(insuranceFee)} />
+                <SummaryRow
+                  label={t("checkout.insurance")}
+                  value={insuranceSelected ? formatRupiah(insuranceFee) : "-"}
+                />
                 <SummaryRow
                   label={t("cart.shipping")}
-                  value={
-                    selectedCourier ? formatRupiah(shippingFee) : <span className="text-slate-300">-</span>
-                  }
+                  value={selectedCourier ? formatRupiah(shippingFee) : <span className="text-slate-300">-</span>}
+                />
+                <SummaryRow
+                  label={t("checkout.packing")}
+                  value={packingFee > 0 ? formatRupiah(packingFee) : "-"}
                 />
                 <div className="mt-3 flex items-start justify-between border-t border-slate-100 pt-3">
                   <div>

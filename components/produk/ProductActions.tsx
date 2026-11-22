@@ -42,6 +42,10 @@ export default function ProductActions({
         stock: product.stock ?? stock ?? 10,
         category: product.category,
         badge: product.badge,
+        weightKg: product.weightKg,
+        lengthCm: product.lengthCm,
+        widthCm: product.widthCm,
+        heightCm: product.heightCm,
       },
       qty
     );
@@ -60,6 +64,10 @@ export default function ProductActions({
         stock: product.stock ?? stock ?? 10,
         category: product.category,
         badge: product.badge,
+        weightKg: product.weightKg,
+        lengthCm: product.lengthCm,
+        widthCm: product.widthCm,
+        heightCm: product.heightCm,
       },
       qty
     );

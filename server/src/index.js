@@ -1,5 +1,6 @@
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
@@ -9,6 +10,11 @@ require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 const { prisma } = require("./prisma");
 const { signToken, requireUser, requireRole, optionalUser, publicUser } = require("./auth");
+const {
+  SHIPPING_SERVICES,
+  getService,
+  quoteShipping,
+} = require("./shipping");
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -60,6 +66,11 @@ function parseAmount(value) {
   return Number(digits) || 0;
 }
 
+function positiveNumberField(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
 function toDate(value) {
   if (!value) return null;
   const d = new Date(value);
@@ -79,8 +90,95 @@ function mapProduct(row) {
     status: row.status,
     image_url: row.image_url,
     images: Array.isArray(row.images) ? row.images : [],
+    weight_kg: Number(row.weight_kg || 1),
+    length_cm: Number(row.length_cm || 20),
+    width_cm: Number(row.width_cm || 15),
+    height_cm: Number(row.height_cm || 10),
+    is_flash_sale: Boolean(row.is_flash_sale),
+    flash_sale_quota: Number(row.flash_sale_quota || 0),
     created_at: row.created_at,
     updated_at: row.updated_at,
+  };
+}
+
+const FLASH_SALE_REVENUE_STATUSES = ["paid", "shipped", "completed"];
+
+function normalizeProductName(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Data flash sale dihitung dari produk yang ditandai sebagai flash sale di DB.
+ * Terjual = qty item pada order berstatus paid/shipped/completed, sehingga order
+ * dibatalkan atau menunggu pembayaran tidak ikut terhitung.
+ */
+async function getFlashSaleSnapshot() {
+  const products = await prisma.product.findMany({
+    where: { is_flash_sale: true, status: "active" },
+    orderBy: { name: "asc" },
+  });
+  const quota = products.reduce((sum, product) => sum + Math.max(0, Number(product.flash_sale_quota || 0)), 0);
+  const empty = {
+    products: products.map((product) => ({
+      ...mapProduct(product),
+      flash_sale_sold: 0,
+      flash_sale_remaining: Math.max(0, Number(product.flash_sale_quota || 0)),
+    })),
+    soldUnits: 0,
+    quota,
+    remaining: quota,
+  };
+  if (!products.length) return empty;
+
+  const [items, orders] = await Promise.all([
+    prisma.orderItem.findMany({
+      select: { order_id: true, product_id: true, product_name: true, qty: true },
+    }),
+    prisma.order.findMany({
+      where: { status: { in: FLASH_SALE_REVENUE_STATUSES } },
+      select: { id: true },
+    }),
+  ]);
+  if (!items.length || !orders.length) return empty;
+
+  const paidOrderIds = new Set(orders.map((order) => order.id));
+  const byId = new Map(products.map((product) => [product.id, product]));
+  const byName = new Map(products.map((product) => [normalizeProductName(product.name), product]));
+  const soldByProduct = new Map();
+
+  items.forEach((item) => {
+    if (!paidOrderIds.has(item.order_id)) return;
+    const itemName = normalizeProductName(item.product_name);
+    let product = item.product_id ? byId.get(item.product_id) : null;
+    if (!product && itemName) {
+      product = byName.get(itemName);
+      if (!product) {
+        product = products.find((candidate) => {
+          const name = normalizeProductName(candidate.name);
+          return name.startsWith(itemName) || itemName.startsWith(name);
+        });
+      }
+    }
+    if (!product) return;
+    const qty = Number(item.qty || 0);
+    if (qty > 0) soldByProduct.set(product.id, (soldByProduct.get(product.id) || 0) + qty);
+  });
+
+  const enriched = products.map((product) => {
+    const productQuota = Math.max(0, Number(product.flash_sale_quota || 0));
+    const sold = Math.min(productQuota || Number.MAX_SAFE_INTEGER, soldByProduct.get(product.id) || 0);
+    return {
+      ...mapProduct(product),
+      flash_sale_sold: sold,
+      flash_sale_remaining: Math.max(0, productQuota - sold),
+    };
+  });
+  const soldUnits = enriched.reduce((sum, product) => sum + product.flash_sale_sold, 0);
+  return {
+    products: enriched,
+    soldUnits,
+    quota,
+    remaining: enriched.reduce((sum, product) => sum + product.flash_sale_remaining, 0),
   };
 }
 
@@ -95,14 +193,30 @@ function mapOrder(row, items = []) {
     courier: row.courier,
     shipping_address: row.shipping_address,
     shipping_eta: row.shipping_eta,
+    shipping_zone: row.shipping_zone,
+    shipping_region: row.shipping_region,
     tracking_number: row.tracking_number,
     shipping_deadline: row.shipping_deadline,
     cancel_reason: row.cancel_reason,
     subtotal: Number(row.subtotal || 0),
     product_fee: Number(row.product_fee || 0),
+    seller_fee: Number(row.seller_fee || row.product_fee || 0),
+    seller_fee_rate: Number(row.seller_fee_rate || 0),
+    platform_revenue: Number(row.platform_revenue || row.product_fee || 0),
     insurance_fee: Number(row.insurance_fee || 0),
     shipping_fee: Number(row.shipping_fee || 0),
+    packing_type: row.packing_type || "none",
+    packing_fee: Number(row.packing_fee || 0),
+    distance_km: row.distance_km == null ? null : Number(row.distance_km),
+    insurance_selected: row.insurance_selected !== false,
+    shipping_breakdown: row.shipping_breakdown || null,
+    stock_decremented: Boolean(row.stock_decremented),
     total: Number(row.total || 0),
+    payment_mode: row.payment_mode || null,
+    payment_status: row.payment_status || "pending",
+    midtrans_order_id: row.midtrans_order_id || null,
+    midtrans_redirect_url: row.midtrans_redirect_url || null,
+    paid_at: row.paid_at,
     processed_at: row.processed_at,
     shipped_at: row.shipped_at,
     completed_at: row.completed_at,
@@ -119,12 +233,389 @@ function mapOrder(row, items = []) {
       price: Number(i.price || 0),
       qty: Number(i.qty || 0),
       subtotal: Number(i.subtotal || 0),
+      seller_fee: Number(i.seller_fee || 0),
+      seller_fee_rate: Number(i.seller_fee_rate || 0),
+      seller_net: Number(i.seller_net || 0),
+      seller_tenure_months: Number(i.seller_tenure_months || 0),
+      seller_sold_qty: Number(i.seller_sold_qty || 0),
     })),
   };
 }
 
+function mapReview(row) {
+  return {
+    id: row.id,
+    product_id: row.product_id,
+    product_name: row.product_name,
+    order_id: row.order_id,
+    order_item_id: row.order_item_id,
+    buyer_id: row.buyer_id,
+    reviewer_name: row.reviewer_name,
+    rating: Number(row.rating || 0),
+    comment: row.comment,
+    media: Array.isArray(row.media) ? row.media : [],
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function summarizeReviews(reviews) {
+  const count = reviews.length;
+  const total = reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0);
+  const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  reviews.forEach((review) => {
+    const rating = Math.min(5, Math.max(1, Math.round(Number(review.rating || 0))));
+    breakdown[rating] += 1;
+  });
+  return {
+    count,
+    average: count ? Number((total / count).toFixed(1)) : 0,
+    breakdown,
+  };
+}
+
+const REVIEW_MEDIA_LIMIT = 5;
+
+// Media ulasan disimpan sebagai array JSON: [{ type: "image" | "video", url }].
+function normalizeReviewMedia(value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error("Format media ulasan tidak valid.");
+
+  const media = [];
+  let videoCount = 0;
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const type = String(item.type || "").toLowerCase();
+    const url = String(item.url || "").trim();
+
+    if ((type !== "image" && type !== "video") || !url) continue;
+    if (url.length > 1000) continue;
+    if (!/^https?:\/\//i.test(url) && !url.startsWith("/uploads/")) continue;
+
+    if (type === "video") {
+      videoCount += 1;
+      if (videoCount > 1) {
+        throw new Error("Hanya satu video yang dapat diunggah per ulasan.");
+      }
+    }
+
+    if (!media.some((existing) => existing.url === url)) {
+      media.push({ type, url });
+    }
+    if (media.length > REVIEW_MEDIA_LIMIT) {
+      throw new Error(`Maksimal ${REVIEW_MEDIA_LIMIT} media per ulasan.`);
+    }
+  }
+
+  return media;
+}
+
+// Cocokkan produk katalog dari id (uuid) atau nama. Nama juga dicocokkan
+// dengan awalan/akhiran agar varian seperti "... 12/512GB" tetap ketemu.
+async function matchCatalogProducts({ productId, productName } = {}) {
+  const ids = new Set();
+  if (isUuid(productId)) {
+    const product = await prisma.product.findUnique({ where: { id: String(productId) }, select: { id: true } });
+    if (product) ids.add(product.id);
+  }
+
+  const name = String(productName || "").trim().toLowerCase();
+  if (name) {
+    const products = await prisma.product.findMany({ select: { id: true, name: true } });
+    for (const product of products) {
+      const candidate = String(product.name || "").trim().toLowerCase();
+      if (!candidate) continue;
+      if (candidate === name || candidate.startsWith(name) || name.startsWith(candidate)) {
+        ids.add(product.id);
+      }
+    }
+  }
+
+  return [...ids];
+}
+
 function orderNumber() {
   return "EM-" + Date.now().toString().slice(-9) + Math.floor(Math.random() * 90 + 10);
+}
+
+/* ------------------------------------------------------------------ */
+/* Biaya admin seller                                                  */
+/* ------------------------------------------------------------------ */
+
+const SELLER_FEE_MIN = 0.02;
+const SELLER_FEE_MAX = 0.05;
+
+// Biaya admin seller naik dari 2% (seller baru) sampai maksimal 5%
+// berdasarkan lama berjualan dan banyaknya produk yang sudah terjual.
+function calcSellerFeeRate(tenureMonths = 0, soldQty = 0) {
+  const months = Math.max(0, Number(tenureMonths) || 0);
+  const sold = Math.max(0, Number(soldQty) || 0);
+  let rate = SELLER_FEE_MIN;
+
+  if (months >= 3) rate += 0.005;
+  if (months >= 6) rate += 0.005;
+  if (months >= 12) rate += 0.005;
+  if (months >= 24) rate += 0.005;
+
+  if (sold >= 10) rate += 0.005;
+  if (sold >= 50) rate += 0.005;
+  if (sold >= 100) rate += 0.005;
+  if (sold >= 200) rate += 0.005;
+
+  return Math.min(SELLER_FEE_MAX, Math.max(SELLER_FEE_MIN, Number(rate.toFixed(4))));
+}
+
+function monthsBetween(from, to = new Date()) {
+  if (!from) return 0;
+  const start = new Date(from);
+  if (Number.isNaN(start.getTime())) return 0;
+  let months = (to.getFullYear() - start.getFullYear()) * 12 + (to.getMonth() - start.getMonth());
+  if (to.getDate() < start.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+/* ------------------------------------------------------------------ */
+/* Status pembayaran, pelacakan, dan buku kas platform                */
+/* ------------------------------------------------------------------ */
+
+function serializeTracking(row) {
+  return {
+    id: row.id,
+    order_id: row.order_id,
+    code: row.code,
+    status: row.status,
+    location: row.location || null,
+    meta: row.meta && typeof row.meta === "object" ? row.meta : {},
+    created_at: row.created_at,
+  };
+}
+
+async function addTrackingEvent(orderId, code, status, options = {}) {
+  const existing = await prisma.orderTracking.findFirst({ where: { order_id: orderId, code } });
+  if (existing) return existing;
+
+  let createdAt = options.createdAt ? new Date(options.createdAt) : new Date();
+  // Keep events strictly ordered, even when several transitions happen at once.
+  const last = await prisma.orderTracking.findFirst({
+    where: { order_id: orderId },
+    orderBy: { created_at: "desc" },
+  });
+  if (last) {
+    const lastMs = new Date(last.created_at).getTime();
+    if (createdAt.getTime() <= lastMs) createdAt = new Date(lastMs + 1);
+  }
+
+  return prisma.orderTracking.create({
+    data: {
+      order_id: orderId,
+      code,
+      status,
+      location: options.location || null,
+      meta: options.meta || {},
+      created_at: createdAt,
+    },
+  });
+}
+
+async function ensureOrderTracking(order) {
+  if (!order?.id) return;
+  const created = order.created_at || new Date();
+  const paidAt = order.paid_at || (["paid", "shipped", "completed"].includes(order.status) ? order.updated_at || created : null);
+
+  await addTrackingEvent(order.id, "order_created", "waiting_payment", { createdAt: created });
+
+  if (paidAt) {
+    await addTrackingEvent(order.id, "payment_confirmed", "paid", { createdAt: paidAt });
+    await addTrackingEvent(order.id, "processing", "paid", {
+      createdAt: order.processed_at || paidAt,
+      meta: { sellerNote: "Pesanan sedang disiapkan oleh penjual." },
+    });
+  }
+
+  if (order.shipped_at || ["shipped", "completed"].includes(order.status)) {
+    const shippedAt = order.shipped_at || order.completed_at || order.updated_at || created;
+    const meta = {
+      courier: order.courier || null,
+      tracking_number: order.tracking_number || null,
+      eta: order.shipping_eta || null,
+    };
+    await addTrackingEvent(order.id, "shipped", "shipped", { createdAt: shippedAt, meta });
+    await addTrackingEvent(order.id, "in_transit", "shipped", {
+      createdAt: new Date(new Date(shippedAt).getTime() + 6 * 60 * 60 * 1000),
+      meta,
+    });
+  }
+
+  if (order.completed_at || order.status === "completed") {
+    await addTrackingEvent(order.id, "completed", "completed", {
+      createdAt: order.completed_at || order.updated_at || created,
+      meta: { courier: order.courier || null, tracking_number: order.tracking_number || null },
+    });
+  }
+
+  if (order.cancelled_at || order.status === "cancelled") {
+    await addTrackingEvent(order.id, "cancelled", "cancelled", {
+      createdAt: order.cancelled_at || order.updated_at || created,
+      meta: { reason: order.cancel_reason || null },
+    });
+  }
+}
+
+async function syncPlatformLedger(order, status) {
+  if (!order?.id) return;
+  const amount = Number(order.product_fee || order.seller_fee || 0);
+  if (amount <= 0) return;
+
+  let sellerId = order.seller_id || null;
+  if (!sellerId) {
+    const firstItem = await prisma.orderItem.findFirst({
+      where: { order_id: order.id, seller_id: { not: null } },
+      select: { seller_id: true },
+    });
+    sellerId = firstItem?.seller_id || null;
+  }
+
+  const existing = await prisma.platformLedger.findFirst({
+    where: { order_id: order.id, type: "seller_fee" },
+  });
+
+  if (!existing) {
+    await prisma.platformLedger.create({
+      data: {
+        order_id: order.id,
+        order_number: order.order_number,
+        seller_id: sellerId,
+        buyer_id: order.buyer_id || null,
+        type: "seller_fee",
+        amount,
+        status,
+        description: `Biaya admin seller untuk pesanan ${order.order_number}`,
+      },
+    });
+    return;
+  }
+
+  if (existing.status !== status) {
+    await prisma.platformLedger.update({
+      where: { id: existing.id },
+      data: { status, updated_at: new Date() },
+    });
+  }
+}
+
+async function decrementStockForOrder(order) {
+  if (!order || order.stock_decremented) return order;
+
+  const items = await prisma.orderItem.findMany({
+    where: { order_id: order.id },
+    select: { product_id: true, qty: true },
+  });
+
+  const refreshed = await prisma.$transaction(async (tx) => {
+    const currentOrder = await tx.order.findUnique({
+      where: { id: order.id },
+      select: { stock_decremented: true },
+    });
+    if (!currentOrder || currentOrder.stock_decremented) {
+      return tx.order.findUnique({ where: { id: order.id } });
+    }
+
+    for (const item of items) {
+      if (!item.product_id) continue;
+      const product = await tx.product.findUnique({
+        where: { id: item.product_id },
+        select: { stock: true, status: true },
+      });
+      if (!product) continue;
+      const nextStock = Math.max(0, Number(product.stock || 0) - Math.max(1, Number(item.qty || 1)));
+      await tx.product.update({
+        where: { id: item.product_id },
+        data: {
+          stock: nextStock,
+          ...(nextStock <= 0 ? { status: "out_of_stock" } : {}),
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    return tx.order.update({
+      where: { id: order.id },
+      data: { stock_decremented: true, updated_at: new Date() },
+    });
+  });
+
+  return refreshed || order;
+}
+
+async function restoreStockForOrder(order) {
+  if (!order || !order.stock_decremented) return order;
+
+  const items = await prisma.orderItem.findMany({
+    where: { order_id: order.id },
+    select: { product_id: true, qty: true },
+  });
+
+  const refreshed = await prisma.$transaction(async (tx) => {
+    const currentOrder = await tx.order.findUnique({
+      where: { id: order.id },
+      select: { stock_decremented: true },
+    });
+    if (!currentOrder || !currentOrder.stock_decremented) {
+      return tx.order.findUnique({ where: { id: order.id } });
+    }
+
+    for (const item of items) {
+      if (!item.product_id) continue;
+      const product = await tx.product.findUnique({
+        where: { id: item.product_id },
+        select: { stock: true, status: true },
+      });
+      if (!product) continue;
+      const nextStock = Number(product.stock || 0) + Math.max(1, Number(item.qty || 1));
+      await tx.product.update({
+        where: { id: item.product_id },
+        data: {
+          stock: nextStock,
+          ...(product.status === "out_of_stock" && nextStock > 0 ? { status: "active" } : {}),
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    return tx.order.update({
+      where: { id: order.id },
+      data: { stock_decremented: false, updated_at: new Date() },
+    });
+  });
+
+  return refreshed || order;
+}
+
+async function markOrderPaid(order, options = {}) {
+  if (!order) return null;
+  if (!["waiting_payment", "paid", "shipped", "completed"].includes(order.status)) return order;
+
+  const alreadyPaid = ["paid", "shipped", "completed"].includes(order.status);
+  const updated =
+    alreadyPaid && order.payment_status && order.payment_status !== "pending"
+      ? order
+      : await prisma.order.update({
+          where: { id: order.id },
+          data: {
+            status: order.status === "waiting_payment" ? "paid" : order.status,
+            payment_status: options.paymentStatus || "settlement",
+            payment_mode: options.paymentMode || order.payment_mode || "simulation",
+            midtrans_order_id: options.midtransOrderId || order.midtrans_order_id || null,
+            paid_at: order.paid_at || new Date(),
+            updated_at: new Date(),
+          },
+        });
+
+  const paidOrder = await decrementStockForOrder(updated);
+  await ensureOrderTracking(paidOrder);
+  await syncPlatformLedger(paidOrder, "held");
+  return paidOrder;
 }
 
 const PROFILE_FIELDS = [
@@ -195,7 +686,7 @@ async function ensureDefaultCategories() {
 
 const uploadRoot = path.resolve(__dirname, "../uploads");
 fs.mkdirSync(uploadRoot, { recursive: true });
-const ALLOWED_BUCKETS = ["avatars", "products", "chat-files"];
+const ALLOWED_BUCKETS = ["avatars", "products", "chat-files", "reviews"];
 
 const storage = multer.diskStorage({
   destination(req, file, cb) {
@@ -616,8 +1107,21 @@ app.delete("/api/categories/:id", requireUser, requireRole("admin"), async (req,
 });
 
 /* ------------------------------------------------------------------ */
-/* Produk                                                              */
+/* Produk & layanan pengiriman                                         */
 /* ------------------------------------------------------------------ */
+
+app.get("/api/shipping/services", (_req, res) => {
+  res.json({ services: SHIPPING_SERVICES });
+});
+
+app.get("/api/flash-sale", optionalUser, async (_req, res) => {
+  try {
+    res.json(await getFlashSaleSnapshot());
+  } catch (err) {
+    console.error("flash sale snapshot failed", err);
+    res.status(500).json({ error: "Gagal memuat data flash sale." });
+  }
+});
 
 app.get("/api/products", optionalUser, async (req, res) => {
   const where = {};
@@ -646,6 +1150,10 @@ app.post("/api/products", requireUser, requireRole("seller", "admin"), async (re
         status,
         image_url: body.image_url || null,
         images: Array.isArray(body.images) ? body.images.filter(Boolean) : null,
+        weight_kg: positiveNumberField(body.weight_kg, 1),
+        length_cm: Math.round(positiveNumberField(body.length_cm, 20)),
+        width_cm: Math.round(positiveNumberField(body.width_cm, 15)),
+        height_cm: Math.round(positiveNumberField(body.height_cm, 10)),
       },
     });
     res.status(201).json({ product: mapProduct(product) });
@@ -670,9 +1178,19 @@ app.patch("/api/products/:id", requireUser, requireRole("seller", "admin"), asyn
     payload.images = Array.isArray(body.images) ? body.images.filter(Boolean) : [];
   }
   if (body.price !== undefined) payload.price = parseAmount(body.price);
+  if (body.weight_kg !== undefined) payload.weight_kg = positiveNumberField(body.weight_kg, 1);
+  if (body.length_cm !== undefined) payload.length_cm = Math.round(positiveNumberField(body.length_cm, 20));
+  if (body.width_cm !== undefined) payload.width_cm = Math.round(positiveNumberField(body.width_cm, 15));
+  if (body.height_cm !== undefined) payload.height_cm = Math.round(positiveNumberField(body.height_cm, 10));
   if (body.stock !== undefined) {
     payload.stock = Number(body.stock);
     if (!body.status) payload.status = payload.stock <= 0 ? "out_of_stock" : existing.status === "draft" ? "draft" : "active";
+  }
+  if (req.profile.role === "admin") {
+    if (body.is_flash_sale !== undefined) payload.is_flash_sale = Boolean(body.is_flash_sale);
+    if (body.flash_sale_quota !== undefined) {
+      payload.flash_sale_quota = Math.max(0, Math.round(Number(body.flash_sale_quota) || 0));
+    }
   }
   try {
     const product = await prisma.product.update({ where: { id: req.params.id }, data: payload });
@@ -681,6 +1199,31 @@ app.patch("/api/products/:id", requireUser, requireRole("seller", "admin"), asyn
     if (err.code === "P2002") return res.status(400).json({ error: "Produk dengan nama ini sudah ada di toko Anda." });
     res.status(400).json({ error: err.message });
   }
+});
+
+app.post("/api/products/:id/stock", requireUser, requireRole("seller", "admin"), async (req, res) => {
+  const existing = await prisma.product.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: "Produk tidak ditemukan." });
+  if (req.profile.role === "seller" && existing.seller_id !== req.user.id) {
+    return res.status(403).json({ error: "Akses ditolak." });
+  }
+
+  const delta = Math.round(Number(req.body?.delta));
+  if (!Number.isFinite(delta) || delta <= 0) {
+    return res.status(400).json({ error: "Jumlah stok yang ditambahkan harus lebih dari 0." });
+  }
+
+  const nextStock = Math.max(0, Number(existing.stock || 0) + delta);
+  const product = await prisma.product.update({
+    where: { id: req.params.id },
+    data: {
+      stock: nextStock,
+      status: existing.status === "draft" ? "draft" : "active",
+      updated_at: new Date(),
+    },
+  });
+
+  res.json({ product: mapProduct(product) });
 });
 
 app.delete("/api/products/:id", requireUser, requireRole("seller", "admin"), async (req, res) => {
@@ -858,13 +1401,27 @@ app.get("/api/orders", requireUser, async (req, res) => {
       productMap[p.id] = p;
     });
 
+    const itemIds = items.map((i) => i.id);
+    const reviewRows = itemIds.length
+      ? await prisma.review.findMany({ where: { order_item_id: { in: itemIds } } })
+      : [];
+    const reviewByItem = {};
+    reviewRows.forEach((review) => {
+      if (review.order_item_id) reviewByItem[review.order_item_id] = mapReview(review);
+    });
+
     res.json({
       orders: orders.map((o) => {
         const mapped = mapOrder(o, byOrder[o.id] || []);
         if (role !== "buyer") mapped.buyer = buyers[o.buyer_id] || null;
         mapped.items = (mapped.items || []).map((it) => {
           const p = it.product_id ? productMap[it.product_id] : null;
-          return { ...it, product_stock: p ? Number(p.stock || 0) : null, product_status: p ? p.status : null };
+          return {
+            ...it,
+            product_stock: p ? Number(p.stock || 0) : null,
+            product_status: p ? p.status : null,
+            review: reviewByItem[it.id] || null,
+          };
         });
         return mapped;
       }),
@@ -885,18 +1442,20 @@ app.get("/api/orders/notifications", requireUser, async (req, res) => {
     if (role === "seller") {
       const sellerItems = await prisma.orderItem.findMany({ where: { seller_id: req.user.id }, select: { order_id: true } });
       orderIds = [...new Set(sellerItems.map((i) => i.order_id))];
-      if (!orderIds.length) return res.json({ notifications: [] });
     }
 
-    const where = { status: "completed", completed_at: { not: null } };
-    if (orderIds) where.id = { in: orderIds };
-
-    const orders = await prisma.order.findMany({
-      where,
-      orderBy: { completed_at: "desc" },
-      take: 20,
-      select: { id: true, order_number: true, buyer_id: true, total: true, completed_at: true },
-    });
+    const orders = orderIds && !orderIds.length
+      ? []
+      : await prisma.order.findMany({
+          where: {
+            status: "completed",
+            completed_at: { not: null },
+            ...(orderIds ? { id: { in: orderIds } } : {}),
+          },
+          orderBy: { completed_at: "desc" },
+          take: 20,
+          select: { id: true, order_number: true, buyer_id: true, total: true, completed_at: true },
+        });
 
     const buyerIds = [...new Set(orders.map((o) => o.buyer_id))];
     const profiles = buyerIds.length
@@ -907,15 +1466,46 @@ app.get("/api/orders/notifications", requireUser, async (req, res) => {
       nameById[p.id] = p.full_name || p.username || null;
     });
 
-    res.json({
-      notifications: orders.map((o) => ({
+    const lowStockWhere = {
+      stock: { lt: 10 },
+      status: { in: ["active", "out_of_stock"] },
+      ...(role === "seller" ? { seller_id: req.user.id } : {}),
+    };
+    const lowStockProducts = await prisma.product.findMany({
+      where: lowStockWhere,
+      orderBy: [{ stock: "asc" }, { updated_at: "desc" }],
+      take: 10,
+      select: { id: true, name: true, stock: true, updated_at: true, created_at: true },
+    });
+
+    const timeValue = (value) => {
+      const time = new Date(value || 0).getTime();
+      return Number.isNaN(time) ? 0 : time;
+    };
+
+    const notifications = [
+      ...orders.map((o) => ({
         id: o.id,
+        type: "order_completed",
         order_number: o.order_number,
         total: Number(o.total || 0),
         completed_at: o.completed_at,
+        timestamp: o.completed_at,
         buyer_name: nameById[o.buyer_id] || null,
       })),
-    });
+      ...lowStockProducts.map((p) => ({
+        id: `low-stock-${p.id}`,
+        type: "low_stock",
+        product_id: p.id,
+        product_name: p.name,
+        stock: Number(p.stock || 0),
+        timestamp: p.updated_at || p.created_at,
+        completed_at: null,
+        buyer_name: null,
+      })),
+    ].sort((a, b) => timeValue(b.timestamp) - timeValue(a.timestamp));
+
+    res.json({ notifications: notifications.slice(0, 30) });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -950,6 +1540,11 @@ app.patch("/api/orders/:id", requireUser, async (req, res) => {
       }
       if (nextStatus !== order.status) {
         data.status = nextStatus;
+        if (nextStatus === "paid") {
+          data.payment_status = order.payment_status && order.payment_status !== "pending" ? order.payment_status : "settlement";
+          data.payment_mode = order.payment_mode || "simulation";
+          data.paid_at = order.paid_at || new Date();
+        }
         if (nextStatus === "shipped") {
           data.processed_at = order.processed_at || new Date();
           data.shipped_at = new Date();
@@ -966,29 +1561,23 @@ app.patch("/api/orders/:id", requireUser, async (req, res) => {
 
     const willCancel = data.status === "cancelled" && order.status !== "cancelled";
 
-    const updated = await prisma.order.update({ where: { id }, data });
+    let resultOrder = await prisma.order.update({ where: { id }, data });
 
-    if (willCancel) {
-      for (const item of orderItems) {
-        if (item.product_id) {
-          void (async () => {
-            try {
-              const current = await prisma.product.findUnique({ where: { id: item.product_id }, select: { stock: true } });
-              if (current) {
-                await prisma.product.update({
-                  where: { id: item.product_id },
-                  data: { stock: Number(current.stock || 0) + Number(item.qty || 0), updated_at: new Date() },
-                });
-              }
-            } catch {
-              /* abaikan */
-            }
-          })();
-        }
-      }
+    if (data.status === "paid" && order.status !== "paid") {
+      resultOrder = await decrementStockForOrder(resultOrder);
     }
 
-    res.json({ order: mapOrder(updated, orderItems) });
+    if (["paid", "shipped", "completed"].includes(resultOrder.status)) {
+      await ensureOrderTracking(resultOrder);
+      await syncPlatformLedger(resultOrder, resultOrder.status === "completed" ? "settled" : "held");
+    } else if (resultOrder.status === "cancelled") {
+      await ensureOrderTracking(resultOrder);
+      await syncPlatformLedger(resultOrder, "cancelled");
+    }
+
+    if (willCancel) resultOrder = await restoreStockForOrder(resultOrder);
+
+    res.json({ order: mapOrder(resultOrder, orderItems) });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1005,28 +1594,116 @@ app.post("/api/orders", requireUser, requireRole("buyer", "admin"), async (req, 
     return res.status(400).json({ error: "Metode pembayaran wajib dipilih." });
   }
 
-  const subtotal = Number(body.subtotal || 0);
-  const productFee = Number(body.product_fee || 0);
-  const insuranceFee = Number(body.insurance_fee || 0);
-  const shippingFee = Number(body.shipping_fee || 0);
   const courier = body.courier || "";
-  const total = Number(body.total || subtotal + productFee + insuranceFee + shippingFee);
+  const insuranceSelected = body.insurance_selected !== false && String(body.insurance_selected).toLowerCase() !== "false";
+  const packingType = ["none", "bubble", "wood"].includes(body.packing_type) ? body.packing_type : "none";
+  const distanceKm = Math.max(0, Number(body.distance_km) || 0);
+
+  const productSelect = {
+    id: true,
+    seller_id: true,
+    price: true,
+    name: true,
+    image_url: true,
+    weight_kg: true,
+    length_cm: true,
+    width_cm: true,
+    height_cm: true,
+  };
 
   const resolvedItems = await Promise.all(
     items.map(async (item) => {
-      if (isUuid(item.product_id)) return { ...item, product_id: item.product_id };
-      if (!item.product_name && !item.name) return { ...item, product_id: null };
-      const product = await prisma.product.findFirst({
-        where: { name: item.product_name || item.name },
-        select: { id: true, seller_id: true },
-      });
+      const qty = Math.max(1, Number(item.qty || 1));
+      const name = String(item.product_name || item.name || "").trim();
+      let product = null;
+
+      if (isUuid(item.product_id)) {
+        product = await prisma.product.findUnique({ where: { id: item.product_id }, select: productSelect });
+      }
+      if (!product && name) {
+        product = await prisma.product.findFirst({ where: { name }, select: productSelect });
+      }
+
+      // Harga dan atribut pengiriman selalu diambil dari database, bukan dari client.
+      const price = Number(product?.price ?? 0);
       return {
-        ...item,
         product_id: product?.id || null,
-        seller_id: item.seller_id || product?.seller_id || null,
+        seller_id: product?.seller_id || null,
+        product_name: product?.name || name || "Produk",
+        product_image: product?.image_url || item.product_image || item.image || null,
+        price,
+        qty,
+        subtotal: Math.round(price * qty),
+        weightKg: positiveNumberField(product?.weight_kg, 1),
+        lengthCm: positiveNumberField(product?.length_cm, 20),
+        widthCm: positiveNumberField(product?.width_cm, 15),
+        heightCm: positiveNumberField(product?.height_cm, 10),
       };
     })
   );
+
+  // Hitung biaya admin seller dari lama berjualan + jumlah produk terjual.
+  const sellerIds = [...new Set(resolvedItems.map((i) => i.seller_id).filter(Boolean))];
+  const sellerStats = new Map();
+  await Promise.all(
+    sellerIds.map(async (sellerId) => {
+      const profile = await prisma.profile.findUnique({
+        where: { id: sellerId },
+        select: { created_at: true },
+      });
+      const sellerItemRows = await prisma.orderItem.findMany({
+        where: { seller_id: sellerId },
+        select: { qty: true, order_id: true },
+      });
+      const orderIds = [...new Set(sellerItemRows.map((row) => row.order_id))];
+      const paidOrders = orderIds.length
+        ? await prisma.order.findMany({
+            where: { id: { in: orderIds }, status: { in: ["paid", "shipped", "completed"] } },
+            select: { id: true },
+          })
+        : [];
+      const paidOrderIds = new Set(paidOrders.map((row) => row.id));
+      const soldQty = sellerItemRows
+        .filter((row) => paidOrderIds.has(row.order_id))
+        .reduce((sum, row) => sum + Number(row.qty || 0), 0);
+      const tenureMonths = monthsBetween(profile?.created_at);
+      sellerStats.set(sellerId, {
+        tenureMonths,
+        soldQty,
+        rate: calcSellerFeeRate(tenureMonths, soldQty),
+      });
+    })
+  );
+
+  const sellerFeeTotal = resolvedItems.reduce((sum, item) => {
+    const stats = item.seller_id
+      ? sellerStats.get(item.seller_id)
+      : { tenureMonths: 0, soldQty: 0, rate: SELLER_FEE_MIN };
+    const rate = stats?.rate ?? SELLER_FEE_MIN;
+    const sellerFee = Math.round(item.subtotal * rate);
+    item.seller_fee = sellerFee;
+    item.seller_fee_rate = rate;
+    item.seller_net = item.subtotal - sellerFee;
+    item.seller_tenure_months = stats?.tenureMonths || 0;
+    item.seller_sold_qty = stats?.soldQty || 0;
+    return sum + sellerFee;
+  }, 0);
+
+  const subtotal = resolvedItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const shipping = quoteShipping({
+    service: courier,
+    province: body.address.province,
+    items: resolvedItems,
+    insuranceEnabled: insuranceSelected,
+    packingType,
+    distanceKm,
+  });
+
+  const shippingFee = courier ? shipping.baseFee : 0;
+  const insuranceFee = courier ? shipping.insuranceFee : 0;
+  const packingFee = courier ? shipping.packingFee : 0;
+  const total = subtotal + shippingFee + insuranceFee + packingFee;
+  const sellerFeeRate = subtotal > 0 ? Number((sellerFeeTotal / subtotal).toFixed(4)) : 0;
 
   let order;
   try {
@@ -1034,15 +1711,28 @@ app.post("/api/orders", requireUser, requireRole("buyer", "admin"), async (req, 
       data: {
         buyer_id: req.user.id,
         order_number: orderNumber(),
-        status: body.status || "waiting_payment",
+        status: "waiting_payment",
         payment_method: body.payment_method,
         payment_group: body.payment_group || "bank",
+        payment_status: "pending",
         courier,
         shipping_address: body.address,
+        shipping_eta: courier ? getService(courier).eta : null,
+        shipping_zone: shipping.zone.code,
+        shipping_region: shipping.zone.island,
         subtotal,
-        product_fee: productFee,
+        product_fee: sellerFeeTotal,
+        seller_fee: sellerFeeTotal,
+        seller_fee_rate: sellerFeeRate,
+        platform_revenue: sellerFeeTotal,
         insurance_fee: insuranceFee,
+        insurance_selected: insuranceSelected,
         shipping_fee: shippingFee,
+        packing_type: packingType,
+        packing_fee: packingFee,
+        distance_km: shipping.distanceKm,
+        shipping_breakdown: shipping,
+        stock_decremented: false,
         total,
       },
     });
@@ -1054,11 +1744,16 @@ app.post("/api/orders", requireUser, requireRole("buyer", "admin"), async (req, 
     order_id: order.id,
     product_id: i.product_id || null,
     seller_id: i.seller_id || null,
-    product_name: i.product_name || i.name || "Produk",
-    product_image: i.product_image || i.image || null,
+    product_name: i.product_name || "Produk",
+    product_image: i.product_image || null,
     price: Number(i.price || 0),
     qty: Number(i.qty || 1),
-    subtotal: Number(i.price || 0) * Number(i.qty || 1),
+    subtotal: Number(i.subtotal || 0),
+    seller_fee: Number(i.seller_fee || 0),
+    seller_fee_rate: Number(i.seller_fee_rate || 0),
+    seller_net: Number(i.seller_net || 0),
+    seller_tenure_months: Number(i.seller_tenure_months || 0),
+    seller_sold_qty: Number(i.seller_sold_qty || 0),
   }));
 
   let inserted;
@@ -1070,25 +1765,373 @@ app.post("/api/orders", requireUser, requireRole("buyer", "admin"), async (req, 
     return res.status(400).json({ error: err.message });
   }
 
-  for (const i of resolvedItems) {
-    if (i.product_id) {
-      void (async () => {
-        try {
-          const current = await prisma.product.findUnique({ where: { id: i.product_id }, select: { stock: true } });
-          if (current) {
-            await prisma.product.update({
-              where: { id: i.product_id },
-              data: { stock: Math.max(0, Number(current.stock || 0) - Number(i.qty || 1)), updated_at: new Date() },
-            });
-          }
-        } catch {
-          /* abaikan */
-        }
-      })();
+  await ensureOrderTracking(order);
+
+  res.status(201).json({
+    order: mapOrder(order, inserted || []),
+    fee: {
+      seller_fee: sellerFeeTotal,
+      seller_fee_rate: sellerFeeRate,
+      shipping_zone: shipping.zone,
+      shipping_breakdown: shipping,
+    },
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Pembayaran Midtrans (sandbox + simulasi lokal)                     */
+/* ------------------------------------------------------------------ */
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || process.env.CLIENT_ORIGIN || "http://localhost:3000";
+const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY || "";
+const MIDTRANS_CLIENT_KEY = process.env.MIDTRANS_CLIENT_KEY || process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY || "";
+const MIDTRANS_PRODUCTION = String(process.env.MIDTRANS_IS_PRODUCTION || "false") === "true";
+const MIDTRANS_SNAP_BASE = MIDTRANS_PRODUCTION
+  ? "https://app.midtrans.com/snap/v1/transactions"
+  : "https://app.sandbox.midtrans.com/snap/v1/transactions";
+
+async function getOrderForUser(orderId, req) {
+  if (!isUuid(orderId)) return { order: null, items: [] };
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!order) return { order: null, items: [] };
+  const items = await prisma.orderItem.findMany({ where: { order_id: orderId }, orderBy: { created_at: "asc" } });
+  const userId = req.user?.id;
+  const isBuyer = Boolean(userId) && order.buyer_id === userId;
+  const isSeller = Boolean(userId) && items.some((item) => item.seller_id === userId);
+  const isAdmin = req.profile?.role === "admin";
+  if (!isBuyer && !isSeller && !isAdmin) return { order: null, items: [] };
+  return { order, items };
+}
+
+app.get("/api/orders/:id/tracking", requireUser, async (req, res) => {
+  try {
+    const { order, items } = await getOrderForUser(req.params.id, req);
+    if (!order) return res.status(404).json({ error: "Pesanan tidak ditemukan." });
+
+    await ensureOrderTracking(order);
+    const events = await prisma.orderTracking.findMany({
+      where: { order_id: order.id },
+      orderBy: { created_at: "asc" },
+    });
+
+    res.json({
+      order: mapOrder(order, items),
+      events: events.map(serializeTracking),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/orders/:id/simulate-payment", requireUser, async (req, res) => {
+  try {
+    const { order, items } = await getOrderForUser(req.params.id, req);
+    if (!order) return res.status(404).json({ error: "Pesanan tidak ditemukan." });
+    if (req.profile?.role !== "admin" && order.buyer_id !== req.user.id) {
+      return res.status(403).json({ error: "Akses ditolak." });
     }
+    if (order.status === "cancelled") {
+      return res.status(400).json({ error: "Pesanan sudah dibatalkan." });
+    }
+
+    const updated = await markOrderPaid(order, {
+      paymentMode: "simulation",
+      paymentStatus: "settlement",
+      midtransOrderId: order.midtrans_order_id || order.order_number,
+    });
+
+    res.json({ order: mapOrder(updated, items), mode: "simulation" });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/payments/create", requireUser, async (req, res) => {
+  try {
+    const orderId = String(req.body?.order_id || "");
+    const { order, items } = await getOrderForUser(orderId, req);
+    if (!order) return res.status(404).json({ error: "Pesanan tidak ditemukan." });
+    if (req.profile?.role !== "admin" && order.buyer_id !== req.user.id) {
+      return res.status(403).json({ error: "Akses ditolak." });
+    }
+    if (order.status !== "waiting_payment") {
+      return res.status(400).json({ error: "Pesanan ini sudah tidak menunggu pembayaran." });
+    }
+
+    const midtransOrderId = order.midtrans_order_id || `${order.order_number}-${Date.now().toString().slice(-5)}`;
+
+    if (!MIDTRANS_SERVER_KEY) {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: {
+          payment_mode: "simulation",
+          payment_status: "pending",
+          midtrans_order_id: midtransOrderId,
+          midtrans_token: `SIM-${midtransOrderId}`,
+          midtrans_redirect_url: `${SITE_URL}/pembayaran?order=${order.id}`,
+          updated_at: new Date(),
+        },
+      });
+      return res.json({
+        mode: "simulation",
+        token: `SIM-${midtransOrderId}`,
+        redirect_url: `${SITE_URL}/pembayaran?order=${order.id}`,
+        client_key: "",
+        message: "Kredensial Midtrans belum diatur. Pembayaran memakai simulasi sandbox lokal.",
+      });
+    }
+
+    const feeLines = [];
+    if (Number(order.shipping_fee || 0) > 0) {
+      feeLines.push({ id: "ongkir", price: Number(order.shipping_fee), quantity: 1, name: `Ongkir - ${order.shipping_region || order.shipping_zone || "Indonesia"}` });
+    }
+    if (Number(order.insurance_fee || 0) > 0) {
+      feeLines.push({ id: "asuransi", price: Number(order.insurance_fee), quantity: 1, name: "Asuransi pengiriman" });
+    }
+    if (Number(order.packing_fee || 0) > 0) {
+      feeLines.push({ id: "packing", price: Number(order.packing_fee), quantity: 1, name: `Packing ${order.packing_type}` });
+    }
+
+    const payload = {
+      transaction_details: {
+        order_id: midtransOrderId,
+        gross_amount: Number(order.total || 0),
+      },
+      item_details: [
+        ...items.map((item, index) => ({
+          id: item.product_id || `item-${index + 1}`,
+          price: Number(item.price || 0),
+          quantity: Number(item.qty || 1),
+          name: String(item.product_name || "Produk").slice(0, 50),
+        })),
+        ...feeLines,
+      ],
+      customer_details: {
+        first_name: req.profile?.full_name || req.profile?.username || "Pembeli",
+        email: req.user.email || undefined,
+        phone: req.profile?.phone || undefined,
+      },
+      callbacks: {
+        finish: `${SITE_URL}/pembayaran/berhasil?order=${order.id}`,
+      },
+    };
+
+    const response = await fetch(MIDTRANS_SNAP_BASE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Basic ${Buffer.from(`${MIDTRANS_SERVER_KEY}:`).toString("base64")}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.token) {
+      return res.status(502).json({ error: data.error_messages?.join(", ") || "Gagal membuat transaksi Midtrans." });
+    }
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        payment_mode: "midtrans",
+        payment_status: "pending",
+        midtrans_order_id: midtransOrderId,
+        midtrans_token: data.token,
+        midtrans_redirect_url: data.redirect_url || null,
+        updated_at: new Date(),
+      },
+    });
+
+    res.json({
+      mode: "midtrans",
+      token: data.token,
+      redirect_url: data.redirect_url || null,
+      client_key: MIDTRANS_CLIENT_KEY,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/payments/midtrans/notification", async (req, res) => {
+  try {
+    const notification = req.body || {};
+    const {
+      order_id: notificationOrderId,
+      status_code: statusCode,
+      gross_amount: grossAmount,
+      signature_key: signatureKey,
+      transaction_status: transactionStatus,
+      fraud_status: fraudStatus,
+      payment_type: paymentType,
+    } = notification;
+
+    if (!notificationOrderId) return res.status(400).json({ error: "order_id wajib diisi." });
+
+    if (MIDTRANS_SERVER_KEY) {
+      const expected = crypto
+        .createHash("sha512")
+        .update(`${notificationOrderId}${statusCode}${grossAmount}${MIDTRANS_SERVER_KEY}`)
+        .digest("hex");
+      if (signatureKey && signatureKey !== expected) {
+        return res.status(401).json({ error: "Signature Midtrans tidak valid." });
+      }
+    }
+
+    const order = await prisma.order.findFirst({
+      where: {
+        OR: [{ midtrans_order_id: notificationOrderId }, { order_number: notificationOrderId }],
+      },
+    });
+    if (!order) return res.status(404).json({ error: "Pesanan tidak ditemukan." });
+
+    if (["capture", "settlement"].includes(transactionStatus) && fraudStatus !== "deny") {
+      await markOrderPaid(order, {
+        paymentMode: "midtrans",
+        paymentStatus: transactionStatus,
+        midtransOrderId: notificationOrderId,
+      });
+    } else if (["expire", "cancel", "deny", "failure"].includes(transactionStatus)) {
+      const cancelledAt = new Date();
+      const updated = await prisma.order.update({
+        where: { id: order.id },
+        data: {
+          payment_status: transactionStatus === "expire" ? "expired" : "failed",
+          ...(order.status === "waiting_payment" ? { status: "cancelled", cancelled_at: cancelledAt, cancel_reason: "Pembayaran tidak berhasil." } : {}),
+          updated_at: cancelledAt,
+        },
+      });
+      const stockRestored = await restoreStockForOrder(updated);
+      await ensureOrderTracking(stockRestored);
+      await syncPlatformLedger(stockRestored, "cancelled");
+    } else if (transactionStatus === "pending") {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: {
+          payment_status: "pending",
+          payment_mode: "midtrans",
+          payment_method: paymentType || order.payment_method,
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Ulasan produk                                                       */
+/* ------------------------------------------------------------------ */
+
+app.get("/api/reviews", optionalUser, async (req, res) => {
+  try {
+    const productId = req.query.productId ? String(req.query.productId) : null;
+    const productName = req.query.productName ? String(req.query.productName) : null;
+    const orderId = req.query.orderId ? String(req.query.orderId) : null;
+    const where = {};
+    if (orderId) where.order_id = orderId;
+
+    const hasProductFilter = Boolean(productId || productName);
+    if (hasProductFilter) {
+      const productIds = await matchCatalogProducts({ productId, productName });
+      const conditions = [];
+      if (productIds.length) conditions.push({ product_id: { in: productIds } });
+      if (productName) conditions.push({ product_name: productName });
+      if (!conditions.length) {
+        return res.json({ reviews: [], summary: summarizeReviews([]) });
+      }
+      where.OR = conditions;
+    }
+
+    const reviews = await prisma.review.findMany({
+      where,
+      orderBy: { created_at: "desc" },
+      take: 200,
+    });
+
+    res.json({
+      reviews: reviews.map(mapReview),
+      summary: summarizeReviews(reviews),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/reviews", requireUser, requireRole("buyer", "admin"), async (req, res) => {
+  const body = req.body || {};
+  const rating = Math.round(Number(body.rating));
+  const orderId = body.order_id ? String(body.order_id) : "";
+  const orderItemId = body.order_item_id ? String(body.order_item_id) : "";
+
+  if (!orderId || !orderItemId) {
+    return res.status(400).json({ error: "Pesanan dan produk yang diulas wajib diisi." });
+  }
+  if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: "Rating harus bernilai 1 sampai 5." });
   }
 
-  res.status(201).json({ order: mapOrder(order, inserted || []) });
+  try {
+    const media = normalizeReviewMedia(body.media);
+
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) return res.status(404).json({ error: "Pesanan tidak ditemukan." });
+
+    if (req.profile?.role !== "admin" && order.buyer_id !== req.user.id) {
+      return res.status(403).json({ error: "Akses ditolak." });
+    }
+
+    if (order.status !== "completed") {
+      return res.status(400).json({
+        error: "Ulasan hanya dapat diberikan setelah pesanan berstatus selesai.",
+      });
+    }
+
+    const item = await prisma.orderItem.findUnique({ where: { id: orderItemId } });
+    if (!item || item.order_id !== order.id) {
+      return res.status(404).json({ error: "Produk pada pesanan tidak ditemukan." });
+    }
+
+    const existing = await prisma.review.findFirst({ where: { order_item_id: item.id } });
+    if (existing) {
+      return res.status(400).json({ error: "Produk pada pesanan ini sudah diulas." });
+    }
+
+    const productIds = await matchCatalogProducts({
+      productId: item.product_id,
+      productName: item.product_name,
+    });
+
+    const reviewerName =
+      req.profile?.full_name ||
+      req.profile?.username ||
+      String(req.user.email || "").split("@")[0] ||
+      "Pembeli";
+
+    const review = await prisma.review.create({
+      data: {
+        product_id: productIds[0] || item.product_id || null,
+        product_name: item.product_name || "Produk",
+        order_id: order.id,
+        order_item_id: item.id,
+        buyer_id: req.user.id,
+        reviewer_name: reviewerName,
+        rating,
+        comment: String(body.comment || "").trim().slice(0, 2000) || null,
+        ...(media.length ? { media } : {}),
+      },
+    });
+
+    res.status(201).json({ review: mapReview(review) });
+  } catch (err) {
+    if (err.code === "P2002") {
+      return res.status(400).json({ error: "Produk pada pesanan ini sudah diulas." });
+    }
+    res.status(400).json({ error: err.message });
+  }
 });
 
 /* ------------------------------------------------------------------ */
@@ -1195,7 +2238,7 @@ app.get("/api/bank-accounts", requireUser, async (req, res) => {
   res.json({ accounts });
 });
 
-app.post("/api/bank-accounts", requireUser, requireRole("buyer", "admin"), async (req, res) => {
+app.post("/api/bank-accounts", requireUser, requireRole("buyer", "seller", "admin"), async (req, res) => {
   const body = req.body || {};
   if (!body.bank_name || !body.account_name || !body.account_number) {
     return res.status(400).json({ error: "Nama bank, nama pemilik, dan nomor rekening wajib diisi." });
@@ -1344,11 +2387,711 @@ app.post("/api/conversations/:id/messages", requireUser, async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Keuangan seller & platform                                         */
+/* ------------------------------------------------------------------ */
+
+function createProductMatcher(products) {
+  const byId = new Map(products.map((product) => [product.id, product]));
+  const normalizeName = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const byName = new Map(products.map((product) => [normalizeName(product.name), product]));
+  return (item) => {
+    if (item.product_id && byId.has(item.product_id)) return byId.get(item.product_id);
+    const name = normalizeName(item.product_name);
+    if (!name) return null;
+    if (byName.has(name)) return byName.get(name);
+    return (
+      products.find((product) => {
+        const candidate = normalizeName(product.name);
+        return candidate && (candidate.startsWith(name) || name.startsWith(candidate));
+      }) || null
+    );
+  };
+}
+
+async function sellerFeeProfile(sellerId) {
+  const [profile, sellerItemRows] = await Promise.all([
+    prisma.profile.findUnique({ where: { id: sellerId }, select: { created_at: true } }),
+    prisma.orderItem.findMany({ where: { seller_id: sellerId }, select: { qty: true, order_id: true } }),
+  ]);
+  const orderIds = [...new Set(sellerItemRows.map((row) => row.order_id))];
+  const paidOrders = orderIds.length
+    ? await prisma.order.findMany({
+        where: { id: { in: orderIds }, status: { in: ["paid", "shipped", "completed"] } },
+        select: { id: true },
+      })
+    : [];
+  const paidOrderIds = new Set(paidOrders.map((row) => row.id));
+  const soldQty = sellerItemRows
+    .filter((row) => paidOrderIds.has(row.order_id))
+    .reduce((sum, row) => sum + Number(row.qty || 0), 0);
+  const tenureMonths = monthsBetween(profile?.created_at);
+  return { tenureMonths, soldQty, rate: calcSellerFeeRate(tenureMonths, soldQty) };
+}
+
+const MIN_WITHDRAWAL = 10000;
+
+function serializeWithdrawal(row) {
+  return {
+    id: row.id,
+    seller_id: row.seller_id,
+    amount: Number(row.amount || 0),
+    status: row.status,
+    bank_name: row.bank_name || null,
+    account_name: row.account_name || null,
+    account_number: row.account_number || null,
+    note: row.note || null,
+    requested_at: row.requested_at,
+    processed_at: row.processed_at,
+    created_at: row.created_at,
+  };
+}
+
+function serializePlatformPayout(row) {
+  return {
+    id: row.id,
+    recipient_id: row.recipient_id,
+    recipient_role: row.recipient_role,
+    amount: Number(row.amount || 0),
+    status: row.status,
+    note: row.note || null,
+    created_by: row.created_by || null,
+    created_at: row.created_at,
+  };
+}
+
+async function platformRevenueTotal() {
+  const orders = await prisma.order.findMany({
+    where: { status: { in: ["paid", "shipped", "completed"] } },
+    select: { subtotal: true, product_fee: true, seller_fee: true, platform_revenue: true },
+  });
+  return orders.reduce(
+    (sum, order) => sum + Number(order.seller_fee || order.product_fee || order.platform_revenue || 0),
+    0
+  );
+}
+
+async function platformPayoutTotal() {
+  const agg = await prisma.platformPayout.aggregate({
+    where: { status: "completed" },
+    _sum: { amount: true },
+  });
+  return Number(agg._sum.amount || 0);
+}
+
+async function buildSellerFinance(sellerId) {
+  const products = await prisma.product.findMany({
+    where: { seller_id: sellerId },
+    select: { id: true, name: true },
+  });
+  const productIds = products.map((product) => product.id);
+  const resolveProduct = createProductMatcher(products);
+
+  const filters = [{ seller_id: sellerId }, { seller_id: null }];
+  if (productIds.length) filters.push({ product_id: { in: productIds } });
+  const rawItems = await prisma.orderItem.findMany({
+    where: { OR: filters },
+    select: {
+      id: true,
+      order_id: true,
+      product_id: true,
+      seller_id: true,
+      product_name: true,
+      product_image: true,
+      qty: true,
+      subtotal: true,
+      seller_fee: true,
+      seller_fee_rate: true,
+      seller_net: true,
+    },
+  });
+  const sellerItems = rawItems.filter((item) => item.seller_id === sellerId || resolveProduct(item));
+
+  const orderIds = [...new Set(sellerItems.map((item) => item.order_id))];
+  const orders = orderIds.length
+    ? await prisma.order.findMany({
+        where: { id: { in: orderIds } },
+        select: {
+          id: true,
+          order_number: true,
+          status: true,
+          created_at: true,
+          completed_at: true,
+          paid_at: true,
+          buyer_id: true,
+        },
+      })
+    : [];
+  const orderMap = Object.fromEntries(orders.map((order) => [order.id, order]));
+
+  let settledBalance = 0;
+  let pendingBalance = 0;
+  let totalRevenue = 0;
+  let totalFees = 0;
+
+  const transactions = [];
+  for (const item of sellerItems) {
+    const order = orderMap[item.order_id];
+    if (!order || !["paid", "shipped", "completed"].includes(order.status)) continue;
+
+    const gross = Number(item.subtotal || 0);
+    const fee = Number(item.seller_fee || 0);
+    const net = item.seller_net ? Number(item.seller_net) : gross - fee;
+    const settled = order.status === "completed";
+
+    totalRevenue += gross;
+    totalFees += fee;
+    if (settled) settledBalance += net;
+    else pendingBalance += net;
+
+    transactions.push({
+      id: item.id,
+      order_id: order.id,
+      order_number: order.order_number,
+      product_name: item.product_name,
+      product_image: item.product_image,
+      qty: Number(item.qty || 0),
+      gross,
+      fee,
+      fee_rate: Number(item.seller_fee_rate || 0),
+      net,
+      status: settled ? "settled" : "pending",
+      date: order.completed_at || order.paid_at || order.created_at,
+      order_status: order.status,
+    });
+  }
+
+  transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const feeProfile = await sellerFeeProfile(sellerId);
+  const withdrawals = await prisma.withdrawal.findMany({
+    where: { seller_id: sellerId },
+    orderBy: { created_at: "desc" },
+    take: 100,
+  });
+  const pendingWithdrawal = withdrawals
+    .filter((row) => ["pending", "processing"].includes(row.status))
+    .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const withdrawnAmount = withdrawals
+    .filter((row) => row.status === "completed")
+    .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
+  const platformPayouts = await prisma.platformPayout.findMany({
+    where: { recipient_id: sellerId, status: "completed" },
+    orderBy: { created_at: "desc" },
+    take: 100,
+  });
+  const platformCredits = platformPayouts.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
+  return {
+    summary: {
+      // Saldo aktif = pendapatan pesanan selesai + kredit dana platform
+      // dikurangi penarikan yang sedang diproses maupun yang sudah dicairkan.
+      availableBalance: Math.max(0, settledBalance + platformCredits - pendingWithdrawal - withdrawnAmount),
+      settledBalance,
+      platformCredits,
+      pendingBalance,
+      pendingWithdrawal,
+      withdrawnAmount,
+      totalRevenue,
+      totalFees,
+      totalNet: settledBalance + pendingBalance + platformCredits,
+      transactions: transactions.length,
+    },
+    feeTier: feeProfile,
+    transactions: transactions.slice(0, 200),
+    withdrawals: withdrawals.map(serializeWithdrawal),
+    platformPayouts: platformPayouts.map(serializePlatformPayout),
+  };
+}
+
+app.get("/api/finance/seller", requireUser, requireRole("seller", "admin"), async (req, res) => {
+  try {
+    const sellerId = req.profile.role === "admin" && req.query.sellerId ? String(req.query.sellerId) : req.user.id;
+    res.json(await buildSellerFinance(sellerId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/finance/seller/withdrawals", requireUser, requireRole("seller"), async (req, res) => {
+  try {
+    const sellerId = req.user.id;
+    const amount = Math.round(Number(req.body?.amount || 0));
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "Nominal penarikan tidak valid." });
+    }
+    if (amount < MIN_WITHDRAWAL) {
+      return res.status(400).json({
+        error: `Minimal penarikan Rp ${MIN_WITHDRAWAL.toLocaleString("id-ID")}.`,
+      });
+    }
+
+    const finance = await buildSellerFinance(sellerId);
+    if (amount > finance.summary.availableBalance) {
+      return res.status(400).json({ error: "Saldo aktif tidak mencukupi untuk penarikan ini." });
+    }
+
+    const bankAccountId = req.body?.bank_account_id ? String(req.body.bank_account_id) : "";
+    let bank = null;
+    if (bankAccountId) {
+      bank = await prisma.bankAccount.findUnique({ where: { id: bankAccountId } });
+      if (!bank || bank.user_id !== sellerId) {
+        return res.status(400).json({ error: "Rekening penarikan tidak ditemukan." });
+      }
+    }
+
+    const bankName = (bank?.bank_name || String(req.body?.bank_name || "")).trim();
+    const accountName = (bank?.account_name || String(req.body?.account_name || "")).trim();
+    const accountNumber = (bank?.account_number || String(req.body?.account_number || "")).trim();
+    if (!bankName || !accountName || !accountNumber) {
+      return res.status(400).json({ error: "Lengkapi nama bank, nama pemilik, dan nomor rekening." });
+    }
+
+    if (!bank) {
+      const existing = await prisma.bankAccount.findFirst({
+        where: { user_id: sellerId, bank_name: bankName, account_number: accountNumber },
+      });
+      if (!existing) {
+        await prisma.bankAccount.create({
+          data: {
+            user_id: sellerId,
+            type: "account",
+            bank_name: bankName,
+            account_name: accountName,
+            account_number: accountNumber,
+          },
+        });
+      }
+    }
+
+    const withdrawal = await prisma.withdrawal.create({
+      data: {
+        seller_id: sellerId,
+        amount,
+        status: "pending",
+        bank_name: bankName,
+        account_name: accountName,
+        account_number: accountNumber,
+        note: req.body?.note ? String(req.body.note).slice(0, 500) : null,
+      },
+    });
+
+    const updated = await buildSellerFinance(sellerId);
+    res.status(201).json({
+      withdrawal: serializeWithdrawal(withdrawal),
+      summary: updated.summary,
+      withdrawals: updated.withdrawals,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get("/api/finance/admin", requireUser, requireRole("admin"), async (_req, res) => {
+  try {
+    const orders = await prisma.order.findMany({
+      orderBy: { created_at: "desc" },
+      take: 500,
+      select: {
+        id: true,
+        buyer_id: true,
+        order_number: true,
+        status: true,
+        payment_method: true,
+        payment_group: true,
+        courier: true,
+        subtotal: true,
+        product_fee: true,
+        seller_fee: true,
+        platform_revenue: true,
+        shipping_fee: true,
+        total: true,
+        created_at: true,
+        paid_at: true,
+        completed_at: true,
+      },
+    });
+
+    const orderIds = orders.map((order) => order.id);
+    const items = orderIds.length
+      ? await prisma.orderItem.findMany({
+          where: { order_id: { in: orderIds } },
+          select: {
+            order_id: true,
+            seller_id: true,
+            product_name: true,
+            subtotal: true,
+            seller_fee: true,
+            seller_net: true,
+          },
+        })
+      : [];
+
+    const withdrawals = await prisma.withdrawal.findMany({
+      orderBy: { created_at: "desc" },
+      take: 100,
+    });
+
+    const sellerIds = [
+      ...new Set([
+        ...items.map((item) => item.seller_id).filter(Boolean),
+        ...withdrawals.map((row) => row.seller_id).filter(Boolean),
+      ]),
+    ];
+    const sellers = sellerIds.length
+      ? await prisma.profile.findMany({
+          where: { id: { in: sellerIds } },
+          select: { id: true, full_name: true, store_name: true },
+        })
+      : [];
+    const sellerMap = Object.fromEntries(sellers.map((seller) => [seller.id, seller]));
+
+    const itemsByOrder = {};
+    items.forEach((item) => {
+      (itemsByOrder[item.order_id] = itemsByOrder[item.order_id] || []).push(item);
+    });
+
+    const revenueStatuses = ["paid", "shipped", "completed"];
+    const revenueOrders = orders.filter((order) => revenueStatuses.includes(order.status));
+
+    const summary = {
+      grossVolume: 0,
+      platformRevenue: 0,
+      settledRevenue: 0,
+      heldRevenue: 0,
+      escrowHeldFunds: 0,
+      totalPayoutToSellers: 0,
+      revenueOrders: revenueOrders.length,
+      totalOrders: orders.length,
+      ordersThisMonth: orders.filter((order) => {
+        const d = new Date(order.created_at);
+        const now = new Date();
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      }).length,
+      pendingWithdrawalAmount: withdrawals
+        .filter((row) => ["pending", "processing"].includes(row.status))
+        .reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      completedWithdrawalAmount: withdrawals
+        .filter((row) => row.status === "completed")
+        .reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    };
+
+    const transactions = revenueOrders.map((order) => {
+      const orderItems = itemsByOrder[order.id] || [];
+      const fee = Number(order.seller_fee || order.product_fee || order.platform_revenue || 0);
+      const gross = Number(order.subtotal || 0);
+      const itemNet = orderItems.reduce((sum, item) => {
+        const itemFee = Number(item.seller_fee || 0);
+        const net = item.seller_net ? Number(item.seller_net) : Number(item.subtotal || 0) - itemFee;
+        return sum + net;
+      }, 0);
+      // Legacy orders have no per-item fee snapshot, so fall back to order-level fee.
+      const hasItemFees = orderItems.some((item) => Number(item.seller_fee || 0) > 0 || Number(item.seller_net || 0) > 0);
+      const net = hasItemFees ? itemNet : Math.max(0, gross - fee);
+      const sellerName =
+        sellerMap[orderItems.find((item) => item.seller_id)?.seller_id]?.store_name ||
+        sellerMap[orderItems.find((item) => item.seller_id)?.seller_id]?.full_name ||
+        orderItems[0]?.product_name ||
+        "Seller";
+
+      summary.grossVolume += gross;
+      summary.platformRevenue += fee;
+      summary.totalPayoutToSellers += net;
+      if (order.status === "completed") summary.settledRevenue += fee;
+      else summary.heldRevenue += fee;
+      if (order.status === "paid") summary.escrowHeldFunds += Number(order.total || 0);
+
+      return {
+        id: order.id,
+        order_number: order.order_number,
+        seller: sellerName,
+        buyer_id: order.buyer_id,
+        gross,
+        fee,
+        net,
+        total: Number(order.total || 0),
+        status: order.status,
+        date: order.paid_at || order.created_at,
+        payment_method: order.payment_method || order.payment_group,
+      };
+    });
+
+    // Backfill ledger entries in batches. The old per-order helper issued 2-3
+    // queries for every order and made this endpoint unnecessarily slow.
+    const ledgerOrders = revenueOrders.filter((order) =>
+      Number(order.product_fee || order.seller_fee || order.platform_revenue || 0) > 0
+    );
+    if (ledgerOrders.length) {
+      const existingLedger = await prisma.platformLedger.findMany({
+        where: {
+          order_id: { in: ledgerOrders.map((order) => order.id) },
+          type: "seller_fee",
+        },
+        select: { id: true, order_id: true, status: true },
+      });
+      const existingByOrder = new Map();
+      existingLedger.forEach((entry) => {
+        if (entry.order_id && !existingByOrder.has(entry.order_id)) {
+          existingByOrder.set(entry.order_id, entry);
+        }
+      });
+
+      const ledgerToCreate = [];
+      const ledgerIdsByStatus = { held: [], settled: [] };
+      ledgerOrders.forEach((order) => {
+        const fee = Number(order.product_fee || order.seller_fee || order.platform_revenue || 0);
+        const status = order.status === "completed" ? "settled" : "held";
+        const existing = existingByOrder.get(order.id);
+        if (!existing) {
+          const sellerId = (itemsByOrder[order.id] || []).find((item) => item.seller_id)?.seller_id || null;
+          ledgerToCreate.push({
+            order_id: order.id,
+            order_number: order.order_number,
+            seller_id: sellerId,
+            buyer_id: order.buyer_id || null,
+            type: "seller_fee",
+            amount: fee,
+            status,
+            description: `Biaya admin seller untuk pesanan ${order.order_number}`,
+          });
+        } else if (existing.status !== status && ledgerIdsByStatus[status]) {
+          ledgerIdsByStatus[status].push(existing.id);
+        }
+      });
+
+      if (ledgerToCreate.length) {
+        await prisma.platformLedger.createMany({ data: ledgerToCreate });
+      }
+      await Promise.all(
+        Object.entries(ledgerIdsByStatus)
+          .filter(([, ids]) => ids.length)
+          .map(([status, ids]) =>
+            prisma.platformLedger.updateMany({
+              where: { id: { in: ids } },
+              data: { status, updated_at: new Date() },
+            })
+          )
+      );
+    }
+
+    const ledger = await prisma.platformLedger.findMany({
+      orderBy: { created_at: "desc" },
+      take: 100,
+    });
+
+    const platformPayouts = await prisma.platformPayout.findMany({
+      orderBy: { created_at: "desc" },
+      take: 100,
+    });
+    const payoutRecipientIds = [...new Set(platformPayouts.map((row) => row.recipient_id))];
+    const payoutProfiles = payoutRecipientIds.length
+      ? await prisma.profile.findMany({
+          where: { id: { in: payoutRecipientIds } },
+          select: { id: true, full_name: true, store_name: true },
+        })
+      : [];
+    const payoutProfileMap = Object.fromEntries(payoutProfiles.map((profile) => [profile.id, profile]));
+    const totalPlatformPayouts = platformPayouts
+      .filter((row) => row.status === "completed")
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    summary.totalPlatformPayouts = totalPlatformPayouts;
+    summary.availablePlatformBalance = Math.max(0, summary.platformRevenue - totalPlatformPayouts);
+
+    res.json({
+      summary,
+      transactions,
+      ledger: ledger.map((row) => ({
+        id: row.id,
+        order_id: row.order_id,
+        order_number: row.order_number,
+        seller_id: row.seller_id,
+        type: row.type,
+        amount: Number(row.amount || 0),
+        status: row.status,
+        description: row.description,
+        created_at: row.created_at,
+      })),
+      withdrawals: withdrawals.map((row) => ({
+        ...serializeWithdrawal(row),
+        seller_name:
+          sellerMap[row.seller_id]?.store_name ||
+          sellerMap[row.seller_id]?.full_name ||
+          "Seller",
+      })),
+      payouts: platformPayouts.map((row) => ({
+        ...serializePlatformPayout(row),
+        recipient_name:
+          payoutProfileMap[row.recipient_id]?.store_name ||
+          payoutProfileMap[row.recipient_id]?.full_name ||
+          "User",
+      })),
+      feeTiers: [
+        { rate: 0.02, label: "Seller baru" },
+        { rate: 0.03, label: "Seller berkembang" },
+        { rate: 0.04, label: "Seller lama" },
+        { rate: 0.05, label: "Seller lama & volume tinggi" },
+      ],
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch("/api/finance/admin/withdrawals/:id", requireUser, requireRole("admin"), async (req, res) => {
+  try {
+    const status = String(req.body?.status || "").trim();
+    const allowed = ["pending", "processing", "completed", "rejected"];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ error: "Status penarikan tidak valid." });
+    }
+
+    const existing = await prisma.withdrawal.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      return res.status(404).json({ error: "Permintaan penarikan tidak ditemukan." });
+    }
+    if (existing.status === "completed" || existing.status === "rejected") {
+      return res.status(400).json({ error: "Penarikan ini sudah final dan tidak bisa diubah." });
+    }
+    if (status === "completed") {
+      const finance = await buildSellerFinance(existing.seller_id);
+      const otherHolds = await prisma.withdrawal.aggregate({
+        where: {
+          seller_id: existing.seller_id,
+          status: { in: ["pending", "processing"] },
+          id: { not: existing.id },
+        },
+        _sum: { amount: true },
+      });
+      const usable = finance.summary.settledBalance + finance.summary.platformCredits - Number(otherHolds._sum.amount || 0);
+      if (Number(existing.amount) > usable) {
+        return res.status(400).json({ error: "Saldo seller tidak mencukupi untuk mencairkan penarikan ini." });
+      }
+    }
+
+    const updated = await prisma.withdrawal.update({
+      where: { id: existing.id },
+      data: {
+        status,
+        processed_at: status === "completed" || status === "rejected" ? new Date() : existing.processed_at,
+        note: req.body?.note ? String(req.body.note).slice(0, 500) : existing.note,
+      },
+    });
+
+    const seller = await prisma.profile.findUnique({
+      where: { id: existing.seller_id },
+      select: { full_name: true, store_name: true },
+    });
+
+    res.json({
+      withdrawal: {
+        ...serializeWithdrawal(updated),
+        seller_name: seller?.store_name || seller?.full_name || "Seller",
+      },
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get("/api/finance/admin/payout-recipients", requireUser, requireRole("admin"), async (req, res) => {
+  try {
+    const role = req.query.role === "seller" ? "seller" : "buyer";
+    const q = String(req.query.q || "").trim();
+    const where = { role };
+    if (q) {
+      where.OR = [
+        { full_name: { contains: q } },
+        { store_name: { contains: q } },
+      ];
+    }
+    const rows = await prisma.profile.findMany({
+      where,
+      select: { id: true, role: true, full_name: true, store_name: true },
+      orderBy: { full_name: "asc" },
+      take: 30,
+    });
+    res.json({
+      recipients: rows.map((row) => ({
+        id: row.id,
+        role: row.role,
+        name: row.store_name || row.full_name || "User",
+      })),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/finance/admin/payouts", requireUser, requireRole("admin"), async (req, res) => {
+  try {
+    const recipientId = String(req.body?.recipient_id || "");
+    const amount = Math.round(Number(req.body?.amount || 0));
+
+    if (!recipientId) {
+      return res.status(400).json({ error: "Pilih penerima dana terlebih dahulu." });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "Nominal penyaluran tidak valid." });
+    }
+
+    const recipient = await prisma.profile.findUnique({
+      where: { id: recipientId },
+      select: { id: true, role: true, full_name: true, store_name: true },
+    });
+    if (!recipient || !["seller", "buyer"].includes(recipient.role)) {
+      return res.status(400).json({ error: "Penerima dana tidak ditemukan." });
+    }
+
+    const [totalRevenue, totalPayouts] = await Promise.all([platformRevenueTotal(), platformPayoutTotal()]);
+    const available = Math.max(0, totalRevenue - totalPayouts);
+    if (amount > available) {
+      return res.status(400).json({ error: "Saldo pendapatan platform tidak mencukupi untuk penyaluran ini." });
+    }
+
+    const payout = await prisma.platformPayout.create({
+      data: {
+        recipient_id: recipient.id,
+        recipient_role: recipient.role,
+        amount,
+        status: "completed",
+        note: req.body?.note ? String(req.body.note).slice(0, 500) : null,
+        created_by: req.user.id,
+      },
+    });
+
+    res.status(201).json({
+      payout: {
+        ...serializePlatformPayout(payout),
+        recipient_name: recipient.store_name || recipient.full_name || "User",
+      },
+      availablePlatformBalance: available - amount,
+      totalPlatformPayouts: totalPayouts + amount,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get("/api/finance/payouts", requireUser, async (req, res) => {
+  try {
+    const payouts = await prisma.platformPayout.findMany({
+      where: { recipient_id: req.user.id },
+      orderBy: { created_at: "desc" },
+      take: 100,
+    });
+    res.json({ payouts: payouts.map(serializePlatformPayout) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/* ------------------------------------------------------------------ */
 /* Dashboard                                                          */
 /* ------------------------------------------------------------------ */
 
 app.get("/api/dashboard/admin", requireUser, requireRole("admin"), async (_req, res) => {
-  const [sellers, buyers, products, categoryRows, productRows, sellerRows] = await Promise.all([
+  const [sellers, buyers, products, categoryRows, productRows, sellerRows, flashSale] = await Promise.all([
     prisma.profile.count({ where: { role: "seller" } }),
     prisma.profile.count({ where: { role: "buyer" } }),
     prisma.product.count(),
@@ -1358,6 +3101,7 @@ app.get("/api/dashboard/admin", requireUser, requireRole("admin"), async (_req, 
       orderBy: { created_at: "desc" },
     }),
     prisma.profile.findMany({ where: { role: "seller" }, select: { id: true, full_name: true, store_name: true, role: true } }),
+    getFlashSaleSnapshot(),
   ]);
 
   const productsList = productRows;
@@ -1409,7 +3153,10 @@ app.get("/api/dashboard/admin", requireUser, requireRole("admin"), async (_req, 
   const paidStatuses = ["paid", "shipped", "completed"];
   const revenueOrders = ordersList.filter((o) => paidStatuses.includes(o.status));
   const totalRevenue = revenueOrders.reduce((sum, o) => sum + Number(o.total || 0), 0);
-  const commissionRevenue = revenueOrders.reduce((sum, o) => sum + Number(o.product_fee || 0), 0);
+  const commissionRevenue = revenueOrders.reduce(
+    (sum, o) => sum + Number(o.platform_revenue || o.seller_fee || o.product_fee || 0),
+    0
+  );
   const now = new Date();
   const ordersThisMonth = ordersList.filter(
     (o) => o.created_at && new Date(o.created_at).getMonth() === now.getMonth() && new Date(o.created_at).getFullYear() === now.getFullYear()
@@ -1417,7 +3164,10 @@ app.get("/api/dashboard/admin", requireUser, requireRole("admin"), async (_req, 
   const escrowHeldFunds = ordersList
     .filter((o) => o.status === "paid")
     .reduce((sum, o) => sum + Number(o.total || 0), 0);
-  const totalPayoutToSellers = totalRevenue - commissionRevenue;
+  const totalPayoutToSellers = revenueOrders.reduce((sum, o) => {
+    const fee = Number(o.platform_revenue || o.seller_fee || o.product_fee || 0);
+    return sum + Math.max(0, Number(o.subtotal || 0) - fee);
+  }, 0);
 
   const paymentCounts = {};
   ordersList.forEach((o) => {
@@ -1444,6 +3194,13 @@ app.get("/api/dashboard/admin", requireUser, requireRole("admin"), async (_req, 
       revenueOrders: revenueOrders.length,
     },
     paymentMethods,
+    flashSale: {
+      soldUnits: flashSale.soldUnits,
+      quota: flashSale.quota,
+      remaining: flashSale.remaining,
+      activeProducts: flashSale.products.length,
+      products: flashSale.products,
+    },
   });
 });
 
@@ -1451,7 +3208,39 @@ app.get("/api/dashboard/seller", requireUser, requireRole("seller", "admin"), as
   const sellerId = req.profile.role === "admin" && req.query.sellerId ? String(req.query.sellerId) : req.user.id;
   const products = await prisma.product.findMany({ where: { seller_id: sellerId } });
 
-  const sellerItems = await prisma.orderItem.findMany({ where: { seller_id: sellerId }, select: { order_id: true, subtotal: true } });
+  // Cocokkan item pesanan ke produk seller, termasuk item lama yang seller_id-nya kosong.
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const normalizeName = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const productByName = new Map(products.map((p) => [normalizeName(p.name), p]));
+  const resolveItemProduct = (item) => {
+    if (item.product_id && productById.has(item.product_id)) return productById.get(item.product_id);
+    const name = normalizeName(item.product_name);
+    if (!name) return null;
+    if (productByName.has(name)) return productByName.get(name);
+    return (
+      products.find((product) => {
+        const candidate = normalizeName(product.name);
+        return candidate && (candidate.startsWith(name) || name.startsWith(candidate));
+      }) || null
+    );
+  };
+
+  const productIds = products.map((p) => p.id);
+  const itemFilters = [{ seller_id: sellerId }, { seller_id: null }];
+  if (productIds.length) itemFilters.push({ product_id: { in: productIds } });
+  const rawItems = await prisma.orderItem.findMany({
+    where: { OR: itemFilters },
+    select: {
+      order_id: true,
+      product_id: true,
+      seller_id: true,
+      product_name: true,
+      qty: true,
+      subtotal: true,
+    },
+  });
+  const sellerItems = rawItems.filter((item) => item.seller_id === sellerId || resolveItemProduct(item));
+
   const orderIds = [...new Set(sellerItems.map((i) => i.order_id))];
 
   let revenue = 0;
@@ -1462,14 +3251,13 @@ app.get("/api/dashboard/seller", requireUser, requireRole("seller", "admin"), as
   if (orderIds.length) {
     const sellerOrderRows = await prisma.order.findMany({
       where: { id: { in: orderIds } },
-      select: { id: true, status: true, created_at: true },
+      select: { id: true, status: true, created_at: true, buyer_id: true },
     });
     orderMap = Object.fromEntries(sellerOrderRows.map((o) => [o.id, o]));
     const activeStats = new Set();
     sellerItems.forEach((i) => {
       const order = orderMap[i.order_id];
       if (!order) return;
-      totalOrders += 1;
       if (["paid", "shipped", "completed"].includes(order.status)) {
         revenue += Number(i.subtotal || 0);
       }
@@ -1478,7 +3266,66 @@ app.get("/api/dashboard/seller", requireUser, requireRole("seller", "admin"), as
       }
     });
     activeOrders = activeStats.size;
+    totalOrders = new Set(
+      sellerItems.filter((item) => orderMap[item.order_id]).map((item) => item.order_id)
+    ).size;
   }
+
+  // Statistik produk terpopuler berdasarkan pembelian nyata dari pembeli terdaftar.
+  const purchasedStatuses = new Set(["paid", "shipped", "completed"]);
+  const productStats = new Map();
+  sellerItems.forEach((item) => {
+    const order = orderMap[item.order_id];
+    if (!order || !purchasedStatuses.has(order.status)) return;
+
+    const product = resolveItemProduct(item);
+    const key = product?.id || item.product_id || `name:${normalizeName(item.product_name)}`;
+    const entry =
+      productStats.get(key) || {
+        id: product?.id || item.product_id || null,
+        name: product?.name || item.product_name || "Produk",
+        category: product?.category || null,
+        image_url: product?.image_url || null,
+        sold: 0,
+        revenue: 0,
+        orderIds: new Set(),
+        buyerIds: new Set(),
+      };
+
+    entry.sold += Number(item.qty || 1);
+    entry.revenue += Number(item.subtotal || 0);
+    entry.orderIds.add(item.order_id);
+    if (order.buyer_id) entry.buyerIds.add(order.buyer_id);
+    productStats.set(key, entry);
+  });
+
+  const popularProducts = [...productStats.values()]
+    .map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      category: entry.category,
+      image_url: entry.image_url,
+      sold: entry.sold,
+      revenue: entry.revenue,
+      orders: entry.orderIds.size,
+      buyers: entry.buyerIds.size,
+    }))
+    .sort((a, b) => b.sold - a.sold || b.revenue - a.revenue)
+    .slice(0, 10);
+
+  const lowStockProducts = products
+    .filter((p) => Number(p.stock || 0) < 10 && p.status !== "draft")
+    .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0))
+    .slice(0, 10)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      stock: Number(p.stock || 0),
+      price: Number(p.price || 0),
+      category: p.category,
+      image_url: p.image_url,
+      status: p.status,
+    }));
 
   const sorted = [...products].sort((a, b) => Number(b.stock || 0) - Number(a.stock || 0));
   const recentProducts = sorted.slice(0, 5).map((p) => ({
@@ -1515,13 +3362,15 @@ app.get("/api/dashboard/seller", requireUser, requireRole("seller", "admin"), as
     stats: {
       products: products.length,
       active: products.filter((p) => p.status === "active").length,
-      lowStock: products.filter((p) => p.stock > 0 && p.stock <= 5).length,
+      lowStock: lowStockProducts.length,
       outOfStock: products.filter((p) => p.stock <= 0 || p.status === "out_of_stock").length,
       totalRevenue: revenue,
       totalOrders,
       activeOrders,
     },
     recentProducts,
+    popularProducts,
+    lowStockProducts,
     weekly,
   });
 });

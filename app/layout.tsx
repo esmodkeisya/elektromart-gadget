@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { CartProvider } from "@/lib/CartContext";
-import SWRProvider from "@/lib/SWRProvider";
 
 export const metadata: Metadata = {
   title: "ElektroMart - Belanja Elektronik Original & Terpercaya",
@@ -18,11 +17,9 @@ export default function RootLayout({
   return (
     <html lang="id">
       <body className="bg-slate-50 antialiased">
-        <SWRProvider>
-          <CartProvider>
-            <LanguageProvider>{children}</LanguageProvider>
-          </CartProvider>
-        </SWRProvider>
+        <CartProvider>
+          <LanguageProvider>{children}</LanguageProvider>
+        </CartProvider>
       </body>
     </html>
   );

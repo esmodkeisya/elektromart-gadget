@@ -1,16 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Filter, List, Pencil, PlusCircle, Trash2 } from "lucide-react";
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
 import { api, type CategoryRecord } from "@/lib/api";
-import { useApiData, mutateApi } from "@/hooks/useApiData";
 
 export default function AdminKategori() {
   const { t } = useLanguage();
-  const { data, error: loadError } = useApiData<{ categories: CategoryRecord[] }>("/api/categories");
-  const categories = data?.categories ?? [];
+  const [categories, setCategories] = useState<CategoryRecord[]>([]);
   const [name, setName] = useState("");
   const [color, setColor] = useState("#F59E0B");
   const [subs, setSubs] = useState("");
@@ -19,8 +17,18 @@ export default function AdminKategori() {
   const [error, setError] = useState("");
 
   async function load() {
-    await mutateApi("/api/categories");
+    try {
+      const data = await api<{ categories: CategoryRecord[] }>("/api/categories");
+      setCategories(data.categories || []);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("api.unavailable"));
+    }
   }
+
+  useEffect(() => {
+    void load();
+  }, []);
 
   async function saveCategory() {
     if (!name.trim()) return;
@@ -76,7 +84,7 @@ export default function AdminKategori() {
           </div>
         </div>
         {message ? <p className="mb-4 text-sm text-emerald-600">{message}</p> : null}
-        {error || loadError ? <p className="mb-4 text-sm text-red-600">{error || loadError?.message}</p> : null}
+        {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
           <div className="rounded-2xl bg-white p-5 shadow-card xl:col-span-2">

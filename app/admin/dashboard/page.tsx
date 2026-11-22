@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   LayoutGrid,
   Tags,
@@ -20,14 +20,15 @@ import {
   Zap,
   Flag,
   Loader2,
+  Download,
 } from "lucide-react";
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
 import { api } from "@/lib/api";
-import { useApiData, mutateApi } from "@/hooks/useApiData";
+import { buildWorkbook, downloadWorkbook, reportDate } from "@/lib/report";
 import { formatRupiah } from "@/lib/data";
 
-type CategorySlice = { label: string; value: number; color: string };
+type CategorySlice = { label: string; value: number; stock: number; color: string };
 type PopularProduct = { name: string; stock: number; category?: string | null };
 type TopSeller = { name: string; products: number };
 type OrderStats = {
@@ -40,13 +41,12 @@ type OrderStats = {
   revenueOrders: number;
 };
 type PaymentMethodStat = { name: string; count: number };
-type AdminDashboardResponse = {
-  stats: { sellers: number; buyers: number; products: number; categories: number };
-  categories: { name: string; color: string; product_count: number }[];
-  products: PopularProduct[];
-  sellers: TopSeller[];
-  orders?: OrderStats;
-  paymentMethods?: PaymentMethodStat[];
+type FlashSaleStat = {
+  soldUnits: number;
+  quota: number;
+  remaining: number;
+  activeProducts: number;
+  products: { name: string; stock?: number; flash_sale_quota: number; flash_sale_sold: number; flash_sale_remaining: number }[];
 };
 type ReportRecord = {
   id: string;
@@ -60,16 +60,6 @@ type ReportRecord = {
   status: "pending" | "resolved" | "dismissed";
   created_at: string;
   reporter: string | null;
-};
-
-const EMPTY_ORDERS: OrderStats = {
-  total: 0,
-  thisMonth: 0,
-  totalRevenue: 0,
-  commissionRevenue: 0,
-  escrowHeldFunds: 0,
-  totalPayoutToSellers: 0,
-  revenueOrders: 0,
 };
 
 const reportStatusStyles: Record<ReportRecord["status"], string> = {
@@ -116,30 +106,68 @@ function fromDeg(deg: number) {
 
 export default function DashboardPage() {
   const { t } = useLanguage();
-  const { data, error: dashboardError } = useApiData<AdminDashboardResponse>("/api/dashboard/admin");
-  const { data: reportsData } = useApiData<{ reports: ReportRecord[] }>("/api/reports");
+  const [stats, setStats] = useState({ sellers: 0, buyers: 0, products: 0, categories: 0 });
+  const [categorySales, setCategorySales] = useState<CategorySlice[]>([]);
+  const [popularProducts, setPopularProducts] = useState<PopularProduct[]>([]);
+  const [topSellers, setTopSellers] = useState<TopSeller[]>([]);
+  const [orders, setOrders] = useState<OrderStats>({
+    total: 0,
+    thisMonth: 0,
+    totalRevenue: 0,
+    commissionRevenue: 0,
+    escrowHeldFunds: 0,
+    totalPayoutToSellers: 0,
+    revenueOrders: 0,
+  });
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodStat[]>([]);
+  const [flashSale, setFlashSale] = useState<FlashSaleStat>({
+    soldUnits: 0,
+    quota: 0,
+    remaining: 0,
+    activeProducts: 0,
+    products: [],
+  });
+  const [reports, setReports] = useState<ReportRecord[]>([]);
   const [busyReportId, setBusyReportId] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
 
-  const stats = data?.stats ?? { sellers: 0, buyers: 0, products: 0, categories: 0 };
-  const orders = data?.orders ?? EMPTY_ORDERS;
-  const popularProducts = data?.products ?? [];
-  const topSellers = data?.sellers ?? [];
-  const paymentMethods = data?.paymentMethods ?? [];
-  const reports = reportsData?.reports ?? [];
+  useEffect(() => {
+    void api<{
+      stats: { sellers: number; buyers: number; products: number; categories: number };
+      categories: { name: string; color: string; product_count: number; stock_total?: number }[];
+      products: PopularProduct[];
+      sellers: TopSeller[];
+      orders?: OrderStats;
+      paymentMethods?: PaymentMethodStat[];
+      flashSale?: FlashSaleStat;
+    }>("/api/dashboard/admin")
+      .then((data) => {
+        setStats(data.stats);
+        const categorySales = (data.categories || []).map((category) => ({
+          label: category.name,
+          value: category.product_count || 0,
+          stock: category.stock_total || 0,
+          color: category.color || "#94a3b8",
+        }));
+        const categoryTotal = categorySales.reduce((sum, category) => sum + category.value, 0);
+        const unassignedProducts = Math.max(0, data.stats.products - categoryTotal);
+        const accessories = categorySales.find((category) => category.label.toLowerCase() === "aksesoris");
+        if (accessories && unassignedProducts > 0) accessories.value += unassignedProducts;
+        setCategorySales(categorySales);
+        setPopularProducts(data.products || []);
+        setTopSellers(data.sellers || []);
+        if (data.orders) setOrders(data.orders);
+        if (data.paymentMethods) setPaymentMethods(data.paymentMethods);
+        if (data.flashSale) setFlashSale(data.flashSale);
+        setError("");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : t("api.unavailable")));
 
-  const categorySales = useMemo<CategorySlice[]>(() => {
-    const sales = (data?.categories || []).map((category) => ({
-      label: category.name,
-      value: category.product_count || 0,
-      color: category.color || "#94a3b8",
-    }));
-    const total = sales.reduce((sum, category) => sum + category.value, 0);
-    const unassigned = Math.max(0, (data?.stats.products ?? 0) - total);
-    const accessories = sales.find((category) => category.label.toLowerCase() === "aksesoris");
-    if (accessories && unassigned > 0) accessories.value += unassigned;
-    return sales;
-  }, [data]);
+    void api<{ reports: ReportRecord[] }>("/api/reports")
+      .then((data) => setReports(data.reports || []))
+      .catch(() => {});
+  }, [t]);
 
   async function setReportStatus(id: string, status: ReportRecord["status"]) {
     setBusyReportId(id);
@@ -148,11 +176,189 @@ export default function DashboardPage() {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
-      mutateApi("/api/reports");
+      setReports((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
     } catch (err) {
       setError(err instanceof Error ? err.message : t("api.unavailable"));
     } finally {
       setBusyReportId(null);
+    }
+  }
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      const categorySheet = t("adminReport.category");
+      const paymentSheet = t("admin.popularPaymentMethods");
+      const categoryTotal = 5 + categorySales.length;
+      const paymentTotal = 5 + paymentMethods.length;
+      const sum = (sheet: string, col: string, totalRow: number) =>
+        `='${sheet}'!${col}${totalRow}`;
+      const categoryCell = categorySales.length ? sum(categorySheet, "B", categoryTotal) : 0;
+      const paymentCell = paymentMethods.length ? sum(paymentSheet, "B", paymentTotal) : 0;
+
+      const workbook = buildWorkbook(
+        {
+          title: `${t("adminReport.technicalTitle")} — ElektroMart`,
+          subtitle: `${t("adminReport.generatedAt")}: ${new Date().toLocaleString("id-ID", {
+            day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+          })}`,
+          generatedLabel: t("adminReport.generatedAt"),
+        },
+        [
+          {
+            name: t("adminReport.summary"),
+            title: t("adminReport.technicalTitle"),
+            subtitle: "ElektroMart",
+            columns: [
+              { header: t("adminReport.metric"), width: 36 },
+              { header: t("adminReport.value"), width: 22 },
+              { header: t("adminReport.note"), width: 42 },
+            ],
+            rows: [
+              [t("admin.activeSellers"), { value: stats.sellers, format: "number" }, ""],
+              [t("admin.registeredBuyers"), { value: stats.buyers, format: "number" }, ""],
+              [t("admin.registeredProducts"), { value: stats.products, format: "number" }, ""],
+              [t("admin.registeredCategories"), { value: stats.categories, format: "number" }, ""],
+              [t("admin.totalRevenue"), { value: orders.totalRevenue, format: "currency" }, ""],
+              [t("admin.commissionRevenue"), { value: orders.commissionRevenue, format: "currency" }, ""],
+              [t("admin.escrowHeldFunds"), { value: orders.escrowHeldFunds, format: "currency" }, ""],
+              [t("admin.totalPayoutToSellers"), { value: orders.totalPayoutToSellers, format: "currency" }, ""],
+              [t("adminReport.totalOrder"), { value: orders.total, format: "number" }, ""],
+              [t("admin.totalTransactionsThisMonth"), { value: orders.thisMonth, format: "number" }, ""],
+              [t("adminFinance.revenueOrders"), { value: orders.revenueOrders, format: "number" }, ""],
+              [t("adminReport.reports"), { value: reports.length, format: "number" }, reports.length ? "" : t("report.empty")],
+              [t("admin.flashSaleToday"), { value: flashSale.soldUnits, format: "number" }, `${flashSale.soldUnits}/${flashSale.quota} ${t("soldCount")}`],
+              [t("admin.activeFlashSale"), { value: flashSale.activeProducts, format: "number" }, `${flashSale.soldUnits} ${t("adminReport.soldUnits")} ${t("adminReport.quota")}`],
+              [t("adminReport.productCount"), { value: categoryCell, format: "number" }, t("adminReport.fromCategories")],
+              [t("adminReport.payments"), { value: paymentCell, format: "number" }, t("adminReport.fromPayments")],
+            ],
+          },
+          {
+            name: categorySheet,
+            title: t("admin.distributionPerCategory"),
+            subtitle: t("admin.unitsSoldThisYear"),
+            columns: [
+              { header: t("adminReport.category"), width: 30 },
+              { header: t("adminReport.productCount"), width: 18, format: "number" },
+              { header: t("adminReport.stockTotal"), width: 18, format: "number" },
+              {
+                header: t("adminReport.share"),
+                width: 14,
+                format: "percent",
+                formula: (r) => `IF($B${categoryTotal}=0,0,B${r}/$B${categoryTotal})`,
+              },
+            ],
+            rows: categorySales.map((category) => [category.label, category.value, category.stock, null]),
+            total: (r) => [
+              { value: t("adminReport.total"), format: "text" },
+              `=SUM(B5:B${Math.max(r - 1, 5)})`,
+              `=SUM(C5:C${Math.max(r - 1, 5)})`,
+              `=SUM(D5:D${Math.max(r - 1, 5)})`,
+            ],
+          },
+          {
+            name: paymentSheet,
+            title: t("admin.popularPaymentMethods"),
+            subtitle: t("adminReport.technicalTitle"),
+            columns: [
+              { header: t("adminReport.method"), width: 30 },
+              { header: t("adminReport.payments"), width: 18, format: "number" },
+              {
+                header: t("adminReport.share"),
+                width: 14,
+                format: "percent",
+                formula: (r) => `IF($B${paymentTotal}=0,0,B${r}/$B${paymentTotal})`,
+              },
+            ],
+            rows: paymentMethods.map((method) => [method.name, method.count, null]),
+            total: (r) => [
+              { value: t("adminReport.total"), format: "text" },
+              `=SUM(B5:B${Math.max(r - 1, 5)})`,
+              `=SUM(C5:C${Math.max(r - 1, 5)})`,
+            ],
+          },
+          {
+            name: t("admin.flashSaleToday"),
+            title: t("admin.flashSaleToday"),
+            subtitle: `${flashSale.soldUnits}/${flashSale.quota} ${t("soldCount")}`,
+            columns: [
+              { header: t("adminReport.no"), width: 6, format: "number" },
+              { header: t("adminReport.product"), width: 40 },
+              { header: t("adminReport.quota"), width: 14, format: "number" },
+              { header: t("adminReport.soldUnits"), width: 14, format: "number" },
+              { header: t("adminReport.remaining"), width: 14, format: "number" },
+              { header: t("adminReport.stock"), width: 14, format: "number" },
+            ],
+            rows: flashSale.products.map((product, index) => [
+              index + 1,
+              product.name,
+              product.flash_sale_quota,
+              product.flash_sale_sold,
+              product.flash_sale_remaining,
+              product.stock ?? 0,
+            ]),
+            total: (r) => [
+              { value: t("adminReport.total"), format: "text" }, "",
+              `=SUM(C5:C${Math.max(r - 1, 5)})`,
+              `=SUM(D5:D${Math.max(r - 1, 5)})`,
+              `=SUM(E5:E${Math.max(r - 1, 5)})`,
+              `=SUM(F5:F${Math.max(r - 1, 5)})`,
+            ],
+          },
+          {
+            name: t("bestSellers"),
+            title: t("bestSellers"),
+            subtitle: t("admin.topSoldSubtitle"),
+            columns: [
+              { header: t("adminReport.no"), width: 6, format: "number" },
+              { header: t("adminReport.product"), width: 40 },
+              { header: t("adminReport.stock"), width: 12, format: "number" },
+              { header: t("adminReport.category"), width: 22 },
+            ],
+            rows: popularProducts.map((product, index) => [
+              index + 1, product.name, product.stock, product.category || t("categoryFallback"),
+            ]),
+          },
+          {
+            name: t("adminReport.topSellers"),
+            title: t("adminReport.topSellers"),
+            subtitle: t("admin.highestRevenueThisMonth"),
+            columns: [
+              { header: t("adminReport.no"), width: 6, format: "number" },
+              { header: t("adminReport.seller"), width: 38 },
+              { header: t("adminReport.productsOwned"), width: 16, format: "number" },
+            ],
+            rows: topSellers.map((seller, index) => [index + 1, seller.name, seller.products]),
+          },
+          {
+            name: t("report.adminTitle"),
+            title: t("report.adminTitle"),
+            subtitle: t("report.adminSubtitle"),
+            columns: [
+              { header: t("adminReport.date"), width: 20 },
+              { header: t("adminReport.reportedProduct"), width: 34 },
+              { header: t("adminReport.reason"), width: 22 },
+              { header: t("adminReport.reporter"), width: 24 },
+              { header: t("adminReport.status"), width: 18 },
+              { header: t("adminReport.description"), width: 46 },
+            ],
+            rows: reports.map((report) => [
+              new Date(report.created_at).toLocaleDateString("id-ID", {
+                day: "2-digit", month: "short", year: "numeric",
+              }),
+              report.product_name,
+              report.reason,
+              report.reporter || "-",
+              t(report.status === "pending" ? "report.statusPending" : report.status === "resolved" ? "report.statusResolved" : "report.statusDismissed"),
+              report.description || "",
+            ]),
+          },
+        ]
+      );
+
+      await downloadWorkbook(`laporan-teknis-admin-${reportDate()}.xlsx`, workbook);
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -215,14 +421,26 @@ export default function DashboardPage() {
                 <TodayDate />
               </p>
             </div>
-            <div className="flex gap-2">
-              <span className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-600">
-                <Activity className="mr-1 inline h-3.5 w-3.5" />
-                {t("admin.systemActive")}
-              </span>
-              <span className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-600">
-                {t("admin.liveData")}
-              </span>
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex gap-2">
+                <span className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-600">
+                  <Activity className="mr-1 inline h-3.5 w-3.5" />
+                  {t("admin.systemActive")}
+                </span>
+                <span className="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-600">
+                  {t("admin.liveData")}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleDownload()}
+                disabled={downloading}
+                title={t("admin.downloadTechnicalReport")}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4 text-slate-400" />}
+                {t("admin.downloadTechnicalReport")}
+              </button>
             </div>
           </div>
 
@@ -266,9 +484,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          {error || dashboardError ? (
-            <p className="mt-4 text-sm text-red-600">{error || dashboardError?.message}</p>
-          ) : null}
+          {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
 
           {/* ====== STAT CARDS — Baris 2 ====== */}
           <div className="mt-4 grid grid-cols-2 gap-4">
@@ -454,17 +670,24 @@ export default function DashboardPage() {
                   </span>
                   <div>
                     <p className="text-sm font-bold text-[#0a1633]">{t("admin.flashSaleToday")}</p>
-                    <p className="text-xs text-slate-500">{t("admin.flashSaleProgress")}</p>
+                    <p className="text-xs text-slate-500">
+                      {flashSale.quota
+                        ? `${flashSale.soldUnits} ${t("admin.flashSaleProgress")} ${flashSale.quota}`
+                        : t("admin.noFlashSale")}
+                    </p>
                   </div>
                 </div>
                 <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-amber-100">
                   <div
                     className="h-full rounded-full bg-amber-500"
-                    style={{ width: `${orders.total ? Math.min(100, (orders.revenueOrders / orders.total) * 100) : 0}%` }}
+                    style={{ width: `${flashSale.quota ? Math.min(100, (flashSale.soldUnits / flashSale.quota) * 100) : 0}%` }}
                   />
                 </div>
                 <div className="mt-2 flex items-center justify-between text-[10px] font-medium text-slate-500">
-                  <span>{orders.revenueOrders}/{orders.total} {t("soldCount")}</span>
+                  <span>
+                    {flashSale.soldUnits}/{flashSale.quota} {t("soldCount")}
+                    {flashSale.activeProducts ? ` · ${flashSale.activeProducts} ${t("products")}` : ""}
+                  </span>
                   <span className="font-bold text-amber-600">{orders.thisMonth} {t("admin.thisMonthTx")}</span>
                 </div>
               </div>

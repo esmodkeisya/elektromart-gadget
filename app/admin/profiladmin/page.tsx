@@ -11,7 +11,6 @@ import {
   Wallet,
   Settings,
   Home,
-  Bell,
   User,
   Mail,
   Phone,
@@ -21,6 +20,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import AdminNotificationBell from "../components/AdminNotificationBell";
 
 const navItems = [
   { label: "dashboard", icon: LayoutGrid },
@@ -71,10 +71,7 @@ export default function ProfilAdminPage() {
         <header className="flex items-center justify-end border-b border-slate-200 bg-white px-8 py-4">
           <div className="flex flex-shrink-0 items-center gap-5 pl-6">
             <LanguageSwitcher variant="light" />
-            <div className="relative">
-              <Bell className="h-5 w-5 text-slate-500" />
-              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-orange-500" />
-            </div>
+            <AdminNotificationBell size={20} className="text-slate-500" />
             <Settings className="h-5 w-5 text-slate-500" />
             <div className="h-8 w-8 overflow-hidden rounded-full bg-slate-300" />
           </div>

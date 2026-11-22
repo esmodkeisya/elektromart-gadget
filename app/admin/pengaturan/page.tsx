@@ -5,7 +5,6 @@ import { ArrowRight, Plus, Trash2 } from "lucide-react";
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
 import { api, ApiError } from "@/lib/api";
-import { useApiData, mutateApi } from "@/hooks/useApiData";
 import {
   HELP_PAGES,
   defaultHelpPage,
@@ -24,24 +23,43 @@ export default function AdminPengaturan() {
   const { t } = useLanguage();
   const [activeSlug, setActiveSlug] = useState(HELP_PAGES[0].slug);
   const [editLang, setEditLang] = useState<Locale>("id");
-  const { data: pageRes, isValidating, mutate } = useApiData<{ data: HelpPageData } | null>(
-    `/api/help-pages/${activeSlug}`
-  );
   const [data, setData] = useState<HelpPageData>(
     () => defaultHelpPage(HELP_PAGES[0].slug) ?? EMPTY_PAGE
   );
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
 
-  const loading = isValidating && !pageRes;
-
   useEffect(() => {
+    let mounted = true;
     const fallback = defaultHelpPage(activeSlug) ?? EMPTY_PAGE;
-    setData(mergeHelpPage(fallback, pageRes?.data));
-  }, [activeSlug, pageRes]);
+    setLoading(true);
+    void api<{ data: HelpPageData | null }>(`/api/help-pages/${activeSlug}`)
+      .then((res) => {
+        if (mounted) setData(mergeHelpPage(fallback, res?.data));
+      })
+      .catch(() => {
+        if (mounted) setData(fallback);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [activeSlug]);
 
   async function load(slug: string) {
-    await mutate();
+    const fallback = defaultHelpPage(slug) ?? EMPTY_PAGE;
+    setLoading(true);
+    try {
+      const res = await api<{ data: HelpPageData | null }>(`/api/help-pages/${slug}`);
+      setData(mergeHelpPage(fallback, res?.data));
+    } catch {
+      setData(fallback);
+    } finally {
+      setLoading(false);
+    }
   }
 
   function updateLocalized(field: "title" | "subtitle", value: string) {
@@ -77,7 +95,6 @@ export default function AdminPengaturan() {
         body: JSON.stringify({ data }),
       });
       setData(mergeHelpPage(defaultHelpPage(activeSlug), saved?.data));
-      mutateApi(`/api/help-pages/${activeSlug}`);
       setMessage({ type: "ok", text: t("admin.helpSaved") });
     } catch (err) {
       setMessage({

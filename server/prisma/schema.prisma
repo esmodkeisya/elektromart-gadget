@@ -99,11 +99,18 @@ model Product {
   status      String   @default("active") @db.VarChar(30)
   image_url   String?  @db.Text
   images      Json?
+  weight_kg   Float    @default(1)
+  length_cm   Int      @default(20)
+  width_cm    Int      @default(15)
+  height_cm   Int      @default(10)
+  is_flash_sale     Boolean @default(false)
+  flash_sale_quota  Int     @default(0)
   created_at  DateTime @default(now())
   updated_at  DateTime @default(now())
 
   @@unique([seller_id, name])
   @@index([seller_id])
+  @@index([is_flash_sale])
   @@map("products")
 }
 
@@ -117,14 +124,31 @@ model Order {
   courier         String?  @db.VarChar(120)
   shipping_address Json?
   shipping_eta    String?  @db.VarChar(120)
+  shipping_zone   String?  @db.VarChar(30)
+  shipping_region String?  @db.VarChar(60)
   tracking_number String?  @db.VarChar(120)
   shipping_deadline DateTime?
   cancel_reason   String?  @db.Text
   subtotal        Int      @default(0)
   product_fee     Int      @default(0)
-  insurance_fee   Int      @default(0)
-  shipping_fee    Int      @default(0)
-  total           Int      @default(0)
+  seller_fee      Int      @default(0)
+  seller_fee_rate Float    @default(0)
+  platform_revenue Int     @default(0)
+  insurance_fee      Int      @default(0)
+  shipping_fee       Int      @default(0)
+  packing_type       String   @default("none") @db.VarChar(20)
+  packing_fee        Int      @default(0)
+  distance_km        Float?
+  insurance_selected Boolean  @default(true)
+  shipping_breakdown Json?
+  stock_decremented  Boolean  @default(false)
+  total              Int      @default(0)
+  payment_mode    String?  @db.VarChar(20)
+  payment_status  String   @default("pending") @db.VarChar(30)
+  midtrans_order_id String? @db.VarChar(80)
+  midtrans_token  String?  @db.Text
+  midtrans_redirect_url String? @db.Text
+  paid_at         DateTime?
   processed_at    DateTime?
   shipped_at      DateTime?
   completed_at    DateTime?
@@ -147,11 +171,105 @@ model OrderItem {
   price         Int      @default(0)
   qty           Int      @default(1)
   subtotal      Int      @default(0)
+  seller_fee    Int      @default(0)
+  seller_fee_rate Float  @default(0)
+  seller_net    Int      @default(0)
+  seller_tenure_months Int @default(0)
+  seller_sold_qty Int    @default(0)
   created_at    DateTime @default(now())
 
   @@index([order_id])
   @@index([seller_id])
   @@map("order_items")
+}
+
+model OrderTracking {
+  id         String   @id @default(uuid()) @db.Char(36)
+  order_id   String   @db.Char(36)
+  code       String   @db.VarChar(60)
+  status     String   @db.VarChar(30)
+  location   String?  @db.VarChar(255)
+  meta       Json?
+  created_at DateTime @default(now())
+
+  @@index([order_id])
+  @@map("order_tracking")
+}
+
+model PlatformLedger {
+  id           String   @id @default(uuid()) @db.Char(36)
+  order_id     String?  @db.Char(36)
+  order_number String?  @db.VarChar(60)
+  seller_id    String?  @db.Char(36)
+  buyer_id     String?  @db.Char(36)
+  type         String   @default("seller_fee") @db.VarChar(30)
+  amount       Int      @default(0)
+  status       String   @default("held") @db.VarChar(30)
+  description  String?  @db.Text
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now())
+
+  @@index([order_id])
+  @@index([seller_id])
+  @@index([created_at])
+  @@map("platform_ledger")
+}
+
+model Withdrawal {
+  id             String    @id @default(uuid()) @db.Char(36)
+  seller_id      String    @db.Char(36)
+  amount         Int       @default(0)
+  status         String    @default("pending") @db.VarChar(20)
+  bank_name      String?   @db.VarChar(120)
+  account_name   String?   @db.VarChar(255)
+  account_number String?   @db.VarChar(60)
+  note           String?   @db.Text
+  requested_at   DateTime  @default(now())
+  processed_at   DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now())
+
+  @@index([seller_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("withdrawals")
+}
+
+model PlatformPayout {
+  id             String   @id @default(uuid()) @db.Char(36)
+  recipient_id   String   @db.Char(36)
+  recipient_role String   @db.VarChar(20)
+  amount         Int      @default(0)
+  status         String   @default("completed") @db.VarChar(20)
+  note           String?  @db.Text
+  created_by     String?  @db.Char(36)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now())
+
+  @@index([recipient_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("platform_payouts")
+}
+
+model Review {
+  id            String   @id @default(uuid()) @db.Char(36)
+  product_id    String?  @db.Char(36)
+  product_name  String   @db.VarChar(255)
+  order_id      String?  @db.Char(36)
+  order_item_id String?  @db.Char(36) @unique
+  buyer_id      String?  @db.Char(36)
+  reviewer_name String   @db.VarChar(255)
+  rating        Int      @default(5)
+  comment       String?  @db.Text
+  media         Json?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now())
+
+  @@index([product_id])
+  @@index([buyer_id])
+  @@index([created_at])
+  @@map("reviews")
 }
 
 model Report {

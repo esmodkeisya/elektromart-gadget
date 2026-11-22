@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import { api, type OrderRecord } from "@/lib/api";
-import { useApiData, mutateApi } from "@/hooks/useApiData";
 import { formatRupiah } from "@/lib/data";
+import ProductThumb from "@/components/ProductThumb";
 import TopBar from "../components/TopBar";
 
 type TabId = "all" | "need_ship" | "shipped" | "done" | "cancelled";
@@ -145,11 +145,7 @@ function ShipModal({
                   return (
                     <div key={item.id} className="flex items-center gap-3 rounded-xl border border-[#E8ECF3] p-3">
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[#F4F6FA]">
-                        {item.product_image ? (
-                          <img src={item.product_image} alt={item.product_name} className="h-full w-full object-contain" />
-                        ) : (
-                          <Package size={18} className="text-seller-muted" />
-                        )}
+                        <ProductThumb src={item.product_image} size={18} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-seller-ink">{item.product_name}</p>
@@ -299,10 +295,9 @@ function CancelModal({
 
 export default function Orders() {
   const { t, language } = useLanguage();
-  const { data, error: fetchError, isLoading } = useApiData<{ orders: OrderRecord[] }>("/api/orders");
-  const orders = data?.orders ?? null;
-  const loading = isLoading && !data;
-  const loadFailed = Boolean(fetchError);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("need_ship");
   const [query, setQuery] = useState("");
   const [courierFilter, setCourierFilter] = useState("all");
@@ -322,8 +317,20 @@ export default function Orders() {
   );
 
   const load = useCallback(async () => {
-    await mutateApi("/api/orders");
+    try {
+      const res = await api<{ orders: OrderRecord[] }>("/api/orders");
+      setOrders(res.orders || []);
+      setLoadFailed(false);
+    } catch {
+      setLoadFailed(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   useEffect(() => {
     if (!toast) return;
@@ -384,38 +391,19 @@ export default function Orders() {
     async (id: string, body: Record<string, unknown>) => {
       setBusyId(id);
       try {
-        const res = await api<{ order: OrderRecord }>(`/api/orders/${id}`, {
+        await api<{ order: OrderRecord }>(`/api/orders/${id}`, {
           method: "PATCH",
           body: JSON.stringify(body),
         });
-        await mutateApi(
-          "/api/orders",
-          (current?: { orders: OrderRecord[] }) => {
-            if (!current?.orders) return current;
-            const nextOrders = current.orders.map((o) => {
-              if (o.id !== id) return o;
-              const stockById = new Map(
-                (o.items || []).map((i) => [i.product_id, { product_stock: i.product_stock, product_status: i.product_status }])
-              );
-              const mergedItems = (res.order.items || o.items || []).map((i) => ({
-                ...i,
-                ...(i.product_id ? stockById.get(i.product_id) || {} : {}),
-              }));
-              return { ...o, ...res.order, items: mergedItems };
-            });
-            return { ...current, orders: nextOrders };
-          },
-          { revalidate: false }
-        );
         setToast({ kind: "ok", msg: t("seller.orderSaved") });
-        void mutateApi("/api/orders");
+        await load();
       } catch (error) {
         setToast({ kind: "err", msg: error instanceof Error ? error.message : t("seller.orderActionFailed") });
       } finally {
         setBusyId(null);
       }
     },
-    [t]
+    [t, load]
   );
 
   const confirmShip = async (payload: Record<string, unknown>) => {
@@ -544,11 +532,7 @@ export default function Orders() {
                           {(o.items || []).map((item) => (
                             <div key={item.id} className="flex items-center gap-4">
                               <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[#F4F6FA]">
-                                {item.product_image ? (
-                                  <img src={item.product_image} alt={item.product_name} className="h-full w-full object-contain" />
-                                ) : (
-                                  <Package size={20} className="text-seller-muted" />
-                                )}
+                                <ProductThumb src={item.product_image} size={20} />
                               </div>
                               <div className="min-w-0">
                                 <p className="truncate font-semibold text-seller-ink">{item.product_name}</p>

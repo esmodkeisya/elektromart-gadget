@@ -12,22 +12,74 @@ import {
   Copy,
   Check,
   CreditCard,
+  ExternalLink,
+  FlaskConical,
   HelpCircle,
   Landmark,
+  Loader2,
+  RefreshCw,
   ShieldCheck,
   Smartphone,
   QrCode,
+  Truck,
   XCircle,
   Tag,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { useCart } from "@/lib/CartContext";
-import { api } from "@/lib/api";
+import { useCart, type CheckoutDetail } from "@/lib/CartContext";
+import { api, type OrderRecord } from "@/lib/api";
 import { formatRupiah } from "@/lib/data";
 import { useLanguage } from "@/lib/i18n";
+import { refreshLiveProducts } from "@/hooks/useLiveProducts";
+import ShippingBreakdownPanel from "@/components/checkout/ShippingBreakdown";
 
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
+
+type PaymentInfo = {
+  mode: "midtrans" | "simulation";
+  token: string;
+  redirect_url?: string | null;
+  client_key?: string;
+  message?: string;
+};
+
+declare global {
+  interface Window {
+    snap?: {
+      pay: (
+        token: string,
+        options?: {
+          onSuccess?: (result: unknown) => void;
+          onPending?: (result: unknown) => void;
+          onError?: (result: unknown) => void;
+          onClose?: () => void;
+        }
+      ) => void;
+    };
+  }
+}
+
+function loadSnapScript(clientKey: string): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (window.snap) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-midtrans-snap="true"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("Gagal memuat Midtrans Snap.")));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://app.sandbox.midtrans.com/snap/snap.js";
+    script.async = true;
+    script.dataset.midtransSnap = "true";
+    if (clientKey) script.setAttribute("data-client-key", clientKey);
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Gagal memuat Midtrans Snap."));
+    document.body.appendChild(script);
+  });
+}
 
 function vaNumber(orderId: string) {
   const digits = orderId.replace(/\D/g, "");
@@ -78,6 +130,55 @@ function paymentLogo(method: string) {
     default:
       return "/logos/qris.svg";
   }
+}
+
+const PAYMENT_GROUPS = ["bank", "ewallet", "qris"] as const;
+type PaymentGroup = (typeof PAYMENT_GROUPS)[number];
+
+function isPaymentGroup(value: string | null | undefined): value is PaymentGroup {
+  return Boolean(value) && PAYMENT_GROUPS.includes(value as PaymentGroup);
+}
+
+// Membangun kembali detail checkout dari data pesanan di server. Dipakai saat
+// halaman dibuka lewat tautan `?order=<id>` (mis. redirect Midtrans) dan
+// localStorage tidak lagi menyimpan detail checkout.
+function detailFromOrder(order: OrderRecord): CheckoutDetail {
+  const address = order.shipping_address || {};
+  const items = (order.items || []).map((item) => ({
+    id: item.product_id || item.id,
+    name: item.product_name,
+    price: Number(item.price || 0),
+    image: item.product_image || "/products/iphone-15.svg",
+    qty: Number(item.qty || 1),
+    stock: Number(item.product_stock ?? item.qty ?? 1),
+  }));
+  const createdAt = new Date(order.created_at).getTime();
+  const safeCreatedAt = Number.isNaN(createdAt) ? Date.now() : createdAt;
+
+  return {
+    orderId: order.order_number,
+    orderDbId: order.id,
+    items,
+    subtotal: Number(order.subtotal || 0),
+    shippingFee: Number(order.shipping_fee || 0),
+    insuranceFee: Number(order.insurance_fee || 0),
+    total: Number(order.total || 0),
+    paymentMethod: order.payment_method || "-",
+    paymentGroup: isPaymentGroup(order.payment_group) ? order.payment_group : "bank",
+    courier: order.courier || "-",
+    address: [address.address, address.city, address.province, address.postal].filter(Boolean).join(", "),
+    city: address.city || "",
+    shippingZone: order.shipping_zone,
+    shippingRegion: order.shipping_region,
+    packingType: order.packing_type || "none",
+    packingFee: Number(order.packing_fee || 0),
+    distanceKm: Number(order.distance_km || 0),
+    insuranceSelected: order.insurance_selected !== false,
+    shippingBreakdown: order.shipping_breakdown || null,
+    createdAt: safeCreatedAt,
+    expiresAt: safeCreatedAt + 24 * 60 * 60 * 1000,
+    status: "MENUNGGU PEMBAYARAN",
+  };
 }
 
 function QrSvg({ seed, className }: { seed: string; className?: string }) {
@@ -182,48 +283,190 @@ function eWalletSteps(method: string, t: Translate): string[] {
 
 export default function PaymentPage() {
   const router = useRouter();
-  const { checkoutDetail, clearCart } = useCart();
+  const { checkoutDetail, clearCart, setCheckoutDetail } = useCart();
   const { language, t } = useLanguage();
   const [copied, setCopied] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(24 * 60 * 60 * 1000);
+  const [orderParam, setOrderParam] = useState("");
+  const [recoveredDetail, setRecoveredDetail] = useState<CheckoutDetail | null>(null);
+  const [recoverLoading, setRecoverLoading] = useState(false);
+  const [recoverError, setRecoverError] = useState("");
 
   useEffect(() => {
-    if (!checkoutDetail) return;
-    const start = checkoutDetail.expiresAt - Date.now();
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setOrderParam(params.get("order")?.trim() || "");
+  }, []);
+
+  const needsRecovery = Boolean(orderParam) && checkoutDetail?.orderDbId !== orderParam;
+
+  useEffect(() => {
+    if (!needsRecovery || !orderParam) {
+      setRecoveredDetail(null);
+      setRecoverError("");
+      setRecoverLoading(false);
+      return;
+    }
+    let alive = true;
+    setRecoverLoading(true);
+    setRecoverError("");
+    api<{ order: OrderRecord }>(`/api/orders/${encodeURIComponent(orderParam)}/tracking`)
+      .then((data) => {
+        if (!alive) return;
+        const recovered = detailFromOrder(data.order);
+        setRecoveredDetail(recovered);
+        // Simpan detail hasil recovery supaya halaman sukses menampilkan pesanan yang benar.
+        setCheckoutDetail(recovered);
+      })
+      .catch((err) => {
+        if (alive) setRecoverError(err instanceof Error ? err.message : t("track.loadFailed"));
+      })
+      .finally(() => {
+        if (alive) setRecoverLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [needsRecovery, orderParam, t, setCheckoutDetail]);
+
+  const detail = useMemo(
+    () => (needsRecovery ? recoveredDetail : checkoutDetail) ?? null,
+    [needsRecovery, recoveredDetail, checkoutDetail]
+  );
+
+  useEffect(() => {
+    if (!detail) return;
+    const start = detail.expiresAt - Date.now();
     setTimeLeft(Math.max(0, start));
     const timer = setInterval(() => {
-      const left = checkoutDetail.expiresAt - Date.now();
+      const left = detail.expiresAt - Date.now();
       setTimeLeft(Math.max(0, left));
       if (left <= 0) clearInterval(timer);
     }, 1000);
     return () => clearInterval(timer);
-  }, [checkoutDetail]);
-
-  const detail = useMemo(() => {
-    if (!checkoutDetail) return null;
-    return checkoutDetail;
-  }, [checkoutDetail]);
+  }, [detail]);
 
   const [declared, setDeclared] = useState(false);
+  const [paymentInfo, setPaymentInfo] = useState<PaymentInfo | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
+  const [paying, setPaying] = useState(false);
+  const [payMessage, setPayMessage] = useState("");
+  const [paymentRefresh, setPaymentRefresh] = useState(0);
+
+  const activeOrderId = detail?.orderDbId || "";
+
+  useEffect(() => {
+    if (!activeOrderId) {
+      setPaymentInfo(null);
+      return;
+    }
+    let alive = true;
+    setPaymentLoading(true);
+    setPaymentError("");
+    api<PaymentInfo>("/api/payments/create", {
+      method: "POST",
+      body: JSON.stringify({ order_id: activeOrderId }),
+    })
+      .then((info) => {
+        if (alive) setPaymentInfo(info);
+      })
+      .catch((err) => {
+        if (alive) setPaymentError(err instanceof Error ? err.message : t("pay.midtransError"));
+      })
+      .finally(() => {
+        if (alive) setPaymentLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeOrderId, paymentRefresh, t]);
+
+  const finishPayment = (orderId: string) => {
+    clearCart();
+    refreshLiveProducts();
+    setDeclared(true);
+    router.push(`/pembayaran/berhasil?order=${encodeURIComponent(orderId)}`);
+  };
+
+  const handleSimulate = async () => {
+    if (!activeOrderId) return;
+    setPaying(true);
+    setPaymentError("");
+    try {
+      await api(`/api/orders/${activeOrderId}/simulate-payment`, { method: "POST" });
+      finishPayment(activeOrderId);
+    } catch (err) {
+      setPaymentError(err instanceof Error ? err.message : t("pay.midtransError"));
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const handlePay = async () => {
+    if (!activeOrderId) return;
+    if (!paymentInfo || paymentInfo.mode === "simulation") {
+      await handleSimulate();
+      return;
+    }
+    setPaying(true);
+    setPaymentError("");
+    setPayMessage("");
+    try {
+      await loadSnapScript(paymentInfo.client_key || "");
+      if (!window.snap) throw new Error(t("pay.midtransUnavailable"));
+      window.snap.pay(paymentInfo.token, {
+        onSuccess: () => finishPayment(activeOrderId),
+        onPending: () => setPayMessage(t("pay.midtransPending")),
+        onError: () => setPaymentError(t("pay.midtransFailed")),
+        onClose: () => setPayMessage(t("pay.midtransClosed")),
+      });
+    } catch (err) {
+      setPaymentError(err instanceof Error ? err.message : t("pay.midtransError"));
+    } finally {
+      setPaying(false);
+    }
+  };
 
   if (!detail) {
     return (
       <main className="flex min-h-screen flex-col">
         <Navbar />
         <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col items-center justify-center px-4 py-24 text-center sm:px-6 lg:px-8">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-amber-50">
-            <AlertTriangle className="h-10 w-10 text-amber-500" />
-          </div>
-          <h1 className="mt-5 text-2xl font-bold text-navy-900">{t("pay.noOrder")}</h1>
-          <p className="mt-2 max-w-md text-sm text-slate-500">
-            {t("pay.noOrderDesc")}
-          </p>
-          <Link
-            href="/kategori/semua"
-            className="mt-8 rounded-lg bg-brand-blue px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700"
-          >
-            {t("shopNow")}
-          </Link>
+          {recoverLoading ? (
+            <>
+              <Loader2 className="h-10 w-10 animate-spin text-brand-blue" />
+              <p className="mt-5 text-sm text-slate-500">{t("track.loading")}</p>
+            </>
+          ) : (
+            <>
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-amber-50">
+                <AlertTriangle className="h-10 w-10 text-amber-500" />
+              </div>
+              <h1 className="mt-5 text-2xl font-bold text-navy-900">
+                {recoverError ? t("track.notFoundTitle") : t("pay.noOrder")}
+              </h1>
+              <p className="mt-2 max-w-md text-sm text-slate-500">
+                {recoverError || t("pay.noOrderDesc")}
+              </p>
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                {recoverError ? (
+                  <Link
+                    href="/profil"
+                    className="rounded-lg border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-navy-900 hover:bg-slate-50"
+                  >
+                    {t("track.backToOrders")}
+                  </Link>
+                ) : null}
+                <Link
+                  href="/kategori/semua"
+                  className="rounded-lg bg-brand-blue px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  {t("shopNow")}
+                </Link>
+              </div>
+            </>
+          )}
         </div>
         <Footer />
       </main>
@@ -251,20 +494,6 @@ export default function PaymentPage() {
     }
   };
 
-  const handlePaid = () => {
-    if (detail?.orderDbId) {
-      void api(`/api/orders/${detail.orderDbId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "paid" }),
-      }).catch(() => {
-        /* abaikan: status dapat disinkronkan seller */
-      });
-    }
-    clearCart();
-    setDeclared(true);
-    router.push("/pembayaran/berhasil");
-  };
-
   return (
     <main className="flex min-h-screen flex-col">
       <Navbar />
@@ -289,9 +518,18 @@ export default function PaymentPage() {
                   <Clock className="h-5 w-5 text-amber-500" />
                 </span>
                 <div className="flex-1">
-                  <p className="text-sm font-semibold text-navy-900">
-                    {t("pay.waiting")}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-navy-900">
+                      {t("pay.waiting")}
+                    </p>
+                    <span className="rounded-full bg-[#E8F0FE] px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-[#2563EB]">
+                      {paymentInfo?.mode === "simulation"
+                        ? t("pay.simulationBadge")
+                        : paymentInfo?.mode === "midtrans"
+                          ? "Midtrans Sandbox"
+                          : t("pay.midtransBadge")}
+                    </span>
+                  </div>
                   <p className="mt-0.5 text-xs text-slate-500">
                     {t("pay.willCancel", { orderId: detail.orderId })}
                   </p>
@@ -450,19 +688,82 @@ export default function PaymentPage() {
           <div className="space-y-5">
             {/* Tombol bayar */}
             <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
-              <h2 className="text-base font-bold text-navy-900">{t("pay.alreadyPaidTitle")}</h2>
+              <div className="flex items-start justify-between gap-2">
+                <h2 className="text-base font-bold text-navy-900">
+                  {paymentInfo?.mode === "simulation" ? t("pay.simulationTitle") : t("pay.midtransTitle")}
+                </h2>
+                <span className="rounded-full bg-[#EEF2FF] px-2.5 py-1 text-[10px] font-bold text-[#4F46E5]">
+                  {paymentInfo?.mode === "simulation" ? t("pay.simulationBadge") : t("pay.midtransBadge")}
+                </span>
+              </div>
               <p className="mt-1 text-xs text-slate-500">
-                {t("pay.alreadyPaidDesc")}
+                {paymentInfo?.mode === "simulation" ? t("pay.simulationDesc") : t("pay.midtransDesc")}
               </p>
+
+              {paymentLoading ? (
+                <div className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" /> {t("pay.preparingPayment")}
+                </div>
+              ) : null}
+
+              {paymentError ? (
+                <div className="mt-3 rounded-lg bg-[#FDECEC] px-3 py-2 text-xs font-medium text-[#E11D48]">
+                  {paymentError}
+                </div>
+              ) : null}
+
+              {payMessage ? (
+                <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">{payMessage}</div>
+              ) : null}
+
               <button
-                onClick={handlePaid}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-6 py-3.5 text-sm font-semibold text-white hover:bg-emerald-700"
+                type="button"
+                onClick={handlePay}
+                disabled={paying || paymentLoading}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-6 py-3.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <CheckCircle2 className="h-4 w-4" /> {t("pay.yesPaid")}
+                {paying ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : paymentInfo?.mode === "simulation" ? (
+                  <FlaskConical className="h-4 w-4" />
+                ) : (
+                  <ExternalLink className="h-4 w-4" />
+                )}
+                {paymentInfo?.mode === "simulation" ? t("pay.simulateButton") : t("pay.payWithMidtrans")}
               </button>
+
+              {paymentInfo?.mode === "midtrans" && paymentInfo.redirect_url ? (
+                <a
+                  href={paymentInfo.redirect_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-6 py-3 text-sm font-semibold text-navy-900 hover:bg-slate-50"
+                >
+                  <ExternalLink className="h-4 w-4" /> {t("pay.openMidtrans")}
+                </a>
+              ) : null}
+
+              {detail.orderDbId ? (
+                <Link
+                  href={`/lacak/${detail.orderDbId}`}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-6 py-3 text-sm font-semibold text-navy-900 hover:bg-slate-50"
+                >
+                  <Truck className="h-4 w-4" /> {t("pay.trackOrder")}
+                </Link>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => setPaymentRefresh((value) => value + 1)}
+                disabled={paymentLoading}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg px-6 py-2 text-xs font-semibold text-slate-500 hover:text-navy-900 disabled:opacity-50"
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> {t("pay.refreshPayment")}
+              </button>
+
               <Link
                 href="/bantuan"
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-6 py-3 text-sm font-semibold text-navy-900 hover:bg-slate-50"
+                className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg px-6 py-2 text-xs font-semibold text-slate-500 hover:text-navy-900"
               >
                 {t("pay.needCs")}
               </Link>
@@ -555,7 +856,13 @@ export default function PaymentPage() {
                 <div className="flex justify-between">
                   <span className="text-slate-500">{t("pay.shippingInsurance")}</span>
                   <span className="font-medium text-navy-900">
-                    {formatRupiah(detail.insuranceFee)}
+                    {detail.insuranceSelected === false ? "-" : formatRupiah(detail.insuranceFee)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">{t("checkout.packing")}</span>
+                  <span className="font-medium text-navy-900">
+                    {(detail.packingFee || 0) > 0 ? formatRupiah(detail.packingFee || 0) : "-"}
                   </span>
                 </div>
                 <div className="flex justify-between border-t border-slate-100 pt-3">
@@ -564,6 +871,8 @@ export default function PaymentPage() {
                     {formatRupiah(detail.total)}
                   </span>
                 </div>
+
+                <ShippingBreakdownPanel breakdown={detail.shippingBreakdown} className="mt-3" />
 
                 <div className="mt-2 space-y-2 border-t border-slate-100 pt-3 text-xs">
                   <div className="flex items-center gap-2 text-slate-500">

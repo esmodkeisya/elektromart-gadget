@@ -14,3 +14,4 @@ pnpm-debug.log*
 server/node_modules/
 server/uploads/
 server/prisma/supabase-export.json
+server/backups/

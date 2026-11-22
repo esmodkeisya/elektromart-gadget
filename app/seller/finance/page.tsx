@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 import TopBar from "../components/TopBar";
 import { api } from "@/lib/api";
-import { buildWorkbook, downloadWorkbook, reportDate } from "@/lib/report";
+import { buildWorkbook, downloadWorkbook, excelDate, reportDate, reportDateTime } from "@/lib/report";
+import type { CellValue, ReportMeta, SummaryLine, SummarySpec, TableSpec } from "@/lib/report";
 import { useLanguage } from "@/lib/i18n";
 
 type SellerFinanceTransaction = {
@@ -25,14 +26,20 @@ type SellerFinanceTransaction = {
   order_number: string;
   product_name: string;
   product_image: string | null;
+  category?: string | null;
   qty: number;
+  unit_price?: number;
   gross: number;
   fee: number;
   fee_rate: number;
   net: number;
   status: "pending" | "settled";
   date: string;
+  order_date?: string | null;
   order_status: string;
+  order_status_label?: string;
+  fund_status?: string;
+  estimated_clear?: string | null;
 };
 
 type WithdrawalRecord = {
@@ -59,42 +66,65 @@ type BankAccount = {
 
 type SellerFinanceResponse = {
   summary: {
+    gross: number;
     availableBalance: number;
     settledBalance: number;
     platformCredits: number;
     pendingBalance: number;
     pendingWithdrawal: number;
     withdrawnAmount: number;
+    sellerBalanceRaw: number;
+    deficit: number;
     totalRevenue: number;
     totalFees: number;
     totalNet: number;
     transactions: number;
+    units: number;
+    validOrders: number;
+    activeOrders: number;
+    completedOrders: number;
   };
   feeTier: {
     tenureMonths: number;
     soldQty: number;
     rate: number;
+    since?: string | null;
   };
   transactions: SellerFinanceTransaction[];
   withdrawals: WithdrawalRecord[];
+  platformPayouts?: Array<{
+    id: string;
+    amount: number;
+    status: string;
+    created_at: string;
+    note: string | null;
+  }>;
 };
 
 const EMPTY: SellerFinanceResponse = {
   summary: {
+    gross: 0,
     availableBalance: 0,
     settledBalance: 0,
     platformCredits: 0,
     pendingBalance: 0,
     pendingWithdrawal: 0,
     withdrawnAmount: 0,
+    sellerBalanceRaw: 0,
+    deficit: 0,
     totalRevenue: 0,
     totalFees: 0,
     totalNet: 0,
     transactions: 0,
+    units: 0,
+    validOrders: 0,
+    activeOrders: 0,
+    completedOrders: 0,
   },
-  feeTier: { tenureMonths: 0, soldQty: 0, rate: 0.02 },
+  feeTier: { tenureMonths: 0, soldQty: 0, rate: 0.02, since: null },
   transactions: [],
   withdrawals: [],
+  platformPayouts: [],
 };
 
 const MIN_WITHDRAWAL = 10000;
@@ -129,6 +159,40 @@ function formatDate(iso: string) {
   });
 }
 
+const WIB_MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+// Payload tanggal transaksi sudah berupa "yyyy-mm-dd HH:mm" (WIB).
+// Parsing komponen eksplisit menghindari pergeseran zona waktu dari new Date(string).
+function wibParts(value: string | null | undefined) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute] = match;
+  const monthIndex = Number(month) - 1;
+  if (monthIndex < 0 || monthIndex > 11) return null;
+  return {
+    day,
+    month: WIB_MONTHS[monthIndex],
+    year,
+    time: hour && minute ? `${hour}:${minute}` : null,
+  };
+}
+
+function formatWibDateTime(value: string | null | undefined) {
+  const parts = wibParts(value);
+  if (!parts) return "-";
+  return `${parts.day} ${parts.month} ${parts.year}${parts.time ? ` · ${parts.time} WIB` : ""}`;
+}
+
+function formatWibDate(value: string | null | undefined) {
+  const parts = wibParts(value);
+  if (!parts) return "-";
+  return `${parts.day} ${parts.month} ${parts.year}`;
+}
+
+function formatTransactionDate(value: string) {
+  return wibParts(value) ? formatWibDateTime(value) : formatDate(value);
+}
+
 function maskNumber(value: string | null | undefined) {
   const digits = String(value || "");
   if (digits.length <= 4) return digits;
@@ -154,6 +218,7 @@ export default function Finance() {
   const [note, setNote] = useState("");
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const withdrawalBlocked = Number(data.summary.deficit) > 0;
 
   useEffect(() => {
     let alive = true;
@@ -201,6 +266,10 @@ export default function Finance() {
 
   async function submitWithdrawal() {
     setFormError("");
+    if (withdrawalBlocked) {
+      setFormError(t("seller.withdrawBlockedDeficit"));
+      return;
+    }
     const value = Math.round(Number(amount.replace(/[^\d]/g, "")));
     if (!value || value <= 0) {
       setFormError(t("seller.withdrawInvalid"));
@@ -269,114 +338,231 @@ export default function Finance() {
   async function handleDownload() {
     setDownloading(true);
     try {
-      const txSheet = t("sellerReport.transactions");
-      const txRows = data.transactions.map((row, index) => [
-        index + 1,
-        formatDate(row.date),
-        row.order_number,
-        row.order_status,
-        row.status === "settled" ? t("admin.done") : t("seller.withdrawalPending"),
-        row.product_name,
-        row.qty,
-        Math.round(row.gross / Math.max(Number(row.qty) || 1, 1)),
-        null,
-        row.fee_rate,
-        null,
-        null,
-      ]);
-      const txTotalRow = 5 + txRows.length;
-      const txEnd = Math.max(txTotalRow - 1, 5);
+      type ExportTransaction = {
+        order_number: string;
+        date: string | null;
+        order_date: string | null;
+        product_name: string;
+        category: string | null;
+        qty: number;
+        unit_price: number;
+        gross: number;
+        fee_rate: number;
+        fee: number;
+        net: number;
+        order_status_label: string;
+        fund_status: string;
+        estimated_clear: string | null;
+        status: string;
+      };
+      type ExportWithdrawal = {
+        requested_at: string;
+        status: string;
+        bank_name: string | null;
+        account_number: string | null;
+        amount: number;
+        note: string | null;
+        seller_name: string | null;
+      };
+      type ExportSellerFinance = {
+        summary: {
+          gross: number;
+          totalRevenue: number;
+          totalFees: number;
+          totalNet: number;
+          settledBalance: number;
+          pendingBalance: number;
+          platformCredits: number;
+          withdrawnAmount: number;
+          pendingWithdrawal: number;
+          sellerBalanceRaw: number;
+          availableBalance: number;
+          deficit: number;
+          transactions: number;
+          units: number;
+          validOrders: number;
+          activeOrders: number;
+          completedOrders: number;
+        };
+        feeTier: { tenureMonths: number; soldQty: number; rate: number; since: string | null };
+        transactions: ExportTransaction[];
+        withdrawals: ExportWithdrawal[];
+        platformPayouts?: Array<{ created_at: string; amount: number; status: string; note: string | null }>;
+      };
 
-      const workbook = buildWorkbook(
+      const payload = await api<ExportSellerFinance>("/api/finance/seller");
+      const s = payload.summary;
+      const today = reportDate();
+      const subject = payload.withdrawals.find((row) => row.seller_name)?.seller_name || "Seller";
+      const effectiveRate = s.gross > 0 ? s.totalFees / s.gross : 0;
+      const netMatches = Math.round(s.totalNet) === Math.round(s.settledBalance + s.pendingBalance);
+      const netDiff = s.totalNet - (s.settledBalance + s.pendingBalance);
+      const withdrawalStatus = (status: string) => {
+        const labels: Record<string, string> = {
+          completed: "Berhasil",
+          processing: "Diproses",
+          pending: "Menunggu",
+          rejected: "Ditolak",
+        };
+        return labels[status] || status;
+      };
+
+      const meta: ReportMeta = {
+        title: "Laporan Keuangan Seller",
+        platform: "ElektroMart",
+        subject,
+        period: { from: today, to: today },
+        generatedAt: reportDateTime(),
+        notes: [
+          "Hanya pesanan valid (Dibayar, Dikirim, Selesai) yang dihitung.",
+          "Fee menggunakan snapshot tarif pada saat transaksi.",
+        ],
+        currency: "Rupiah (Rp)",
+      };
+
+      const transactionRows: CellValue[][] = payload.transactions.length
+        ? payload.transactions.map((row, index) => [
+            index + 1,
+            excelDate(row.date),
+            row.order_number,
+            row.product_name,
+            Number(row.qty || 0),
+            Number(row.unit_price || 0),
+            Number(row.gross || 0),
+            Number(row.fee_rate || 0),
+            -Number(row.fee || 0),
+            Number(row.net || 0),
+            row.order_status_label,
+            row.fund_status,
+            excelDate(row.estimated_clear),
+          ])
+        : [["Tidak ada transaksi pada periode ini."]];
+
+      const withdrawalRows: CellValue[][] = payload.withdrawals.length
+        ? payload.withdrawals.map((row) => [
+            excelDate(row.requested_at),
+            withdrawalStatus(row.status),
+            row.bank_name || "-",
+            maskNumber(row.account_number),
+            Number(row.amount || 0),
+            row.note || "",
+          ])
+        : [["Tidak ada penarikan pada periode ini."]];
+
+      const lines: SummaryLine[] = [
+        { kind: "section", label: "1. Penjualan", value: s.gross },
+        { kind: "detail", label: "Subtotal Pesanan (Penjualan Kotor)", value: s.gross, note: "" },
+        { kind: "detail", label: "Jumlah Pesanan", value: { value: s.validOrders, format: "number" }, note: "" },
+        { kind: "detail", label: "Jumlah Unit Terjual", value: { value: s.units, format: "number" }, note: "" },
+        { kind: "spacer" },
+        { kind: "section", label: "2. Potongan", value: -s.totalFees },
         {
-          title: `${t("seller.finance")} — ElektroMart`,
-          subtitle: `${t("sellerReport.generatedAt")}: ${new Date().toLocaleString("id-ID", {
-            day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-          })}`,
-          generatedLabel: t("sellerReport.generatedAt"),
+          kind: "detail",
+          label: "Fee Admin Platform",
+          value: -s.totalFees,
+          note: `Tarif efektif ${(effectiveRate * 100).toFixed(1)}%`,
         },
-        [
-          {
-            name: t("sellerReport.summary"),
-            title: t("sellerReport.summary"),
-            subtitle: `${t("seller.finance")} — ElektroMart`,
-            columns: [
-              { header: t("sellerReport.metric"), width: 34 },
-              { header: t("sellerReport.value"), width: 22 },
-              { header: t("sellerReport.note"), width: 42 },
-            ],
-            rows: [
-              [t("seller.activeBalance"), { value: data.summary.availableBalance, format: "currency" }, t("seller.balanceReadyToWithdraw")],
-              [t("sellerReport.settledBalance"), { value: data.summary.settledBalance, format: "currency" }, ""],
-              [t("seller.platformCredit"), { value: data.summary.platformCredits, format: "currency" }, t("seller.platformCreditDesc")],
-              [t("sellerReport.pendingBalance"), { value: data.summary.pendingBalance, format: "currency" }, t("seller.fromCompletedOrders")],
-              [t("seller.pendingWithdrawal"), { value: data.summary.pendingWithdrawal, format: "currency" }, ""],
-              [t("seller.withdrawnTotal"), { value: data.summary.withdrawnAmount, format: "currency" }, ""],
-              [t("seller.totalRevenueYtd"), { value: `='${txSheet}'!I${txTotalRow}`, format: "currency" }, t("sellerReport.fromTransactions")],
-              [t("sellerFinance.totalFees"), { value: `='${txSheet}'!K${txTotalRow}`, format: "currency" }, t("sellerReport.fromTransactions")],
-              [t("sellerReport.totalNet"), { value: `='${txSheet}'!L${txTotalRow}`, format: "currency" }, t("sellerReport.fromTransactions")],
-              [t("sellerFinance.currentRate"), { value: Number((data.feeTier.rate * 100).toFixed(1)), format: "percentValue" }, ""],
-              [t("sellerFinance.tenure"), t("sellerFinance.months", { count: data.feeTier.tenureMonths }), ""],
-              [t("sellerFinance.soldQty"), { value: data.feeTier.soldQty, format: "number" }, ""],
-              [t("sellerReport.transactionsCount"), { value: `=COUNTA('${txSheet}'!C5:C${Math.max(txEnd, 5)})`, format: "number" }, t("sellerReport.countUnit")],
-            ],
-          },
-          {
-            name: txSheet,
-            title: t("sellerReport.transactions"),
-            subtitle: `${t("seller.finance")} — ElektroMart`,
-            columns: [
-              { header: t("sellerReport.no"), width: 6, format: "number" },
-              { header: t("sellerReport.date"), width: 20 },
-              { header: t("sellerReport.order"), width: 20 },
-              { header: t("sellerReport.orderStatus"), width: 16 },
-              { header: t("sellerReport.status"), width: 12 },
-              { header: t("sellerReport.product"), width: 36 },
-              { header: t("sellerReport.qty"), width: 8, format: "number" },
-              { header: t("sellerReport.unitPrice"), width: 17, format: "currency" },
-              { header: t("sellerReport.gross"), width: 18, format: "currency", formula: (r) => `G${r}*H${r}` },
-              { header: t("sellerReport.feeRate"), width: 12, format: "percent" },
-              { header: t("sellerReport.fee"), width: 17, format: "currency", formula: (r) => `ROUND(I${r}*J${r},0)` },
-              { header: t("sellerReport.net"), width: 18, format: "currency", formula: (r) => `I${r}-K${r}` },
-            ],
-            rows: txRows,
-            total: (r) => [
-              { value: t("sellerReport.total"), format: "text" }, "", "", "", "", "",
-              `=SUM(G5:G${Math.max(r - 1, 5)})`, "",
-              `=SUM(I5:I${Math.max(r - 1, 5)})`, "",
-              `=SUM(K5:K${Math.max(r - 1, 5)})`,
-              `=SUM(L5:L${Math.max(r - 1, 5)})`,
-            ],
-          },
-          {
-            name: t("sellerReport.withdrawals"),
-            title: t("sellerReport.withdrawals"),
-            subtitle: `${t("seller.finance")} — ElektroMart`,
-            columns: [
-              { header: t("sellerReport.date"), width: 20 },
-              { header: t("sellerReport.status"), width: 16 },
-              { header: t("sellerReport.bank"), width: 20 },
-              { header: t("sellerReport.account"), width: 22 },
-              { header: t("sellerReport.amount"), width: 18, format: "currency" },
-              { header: t("sellerReport.note"), width: 36 },
-            ],
-            rows: withdrawals.map((row) => [
-              formatDate(row.requested_at),
-              WITHDRAWAL_STATUS[row.status] ? t(WITHDRAWAL_STATUS[row.status].key) : row.status,
-              row.bank_name || "-",
-              maskNumber(row.account_number),
-              row.amount,
-              row.note || "",
-            ]),
-            total: (r) => [
-              { value: t("sellerReport.total"), format: "text" }, "", "", "",
-              `=SUM(E5:E${Math.max(r - 1, 5)})`, "",
-            ],
-          },
-        ]
-      );
+        { kind: "detail", label: "Potongan lain", value: 0, note: "" },
+        { kind: "subtotal", label: "3. Pendapatan Bersih", value: s.totalNet },
+        { kind: "spacer" },
+        { kind: "section", label: "4. Posisi Saldo" },
+        { kind: "detail", label: "Saldo Selesai", value: s.settledBalance, note: "" },
+        { kind: "detail", label: "Kredit dari Platform", value: s.platformCredits, note: "" },
+        {
+          kind: "detail",
+          label: "Saldo Tertunda (Dibayar + Dikirim)",
+          value: s.pendingBalance,
+          note: `${s.activeOrders} pesanan`,
+        },
+        { kind: "detail", label: "Total Ditarik", value: -s.withdrawnAmount, note: "" },
+        { kind: "detail", label: "Penarikan Diproses", value: -s.pendingWithdrawal, note: "" },
+        { kind: "subtotal", label: "Saldo Aktif (dapat ditarik)", value: s.availableBalance },
+        {
+          kind: "detail",
+          label: "Saldo Minus / Kekurangan",
+          value: s.deficit,
+          note: "Penarikan melebihi saldo selesai; penarikan baru diblokir",
+        },
+        { kind: "spacer" },
+        {
+          kind: "check",
+          label: "Pendapatan Bersih = Saldo Selesai + Saldo Tertunda",
+          value: netMatches ? "OK" : `Selisih ${formatRupiah(Math.abs(netDiff))}`,
+        },
+        { kind: "check", label: "Tarif fee berlaku", value: `${(Number(payload.feeTier.rate || 0) * 100).toFixed(1)}%` },
+        {
+          kind: "detail",
+          label: "Mulai Berjualan",
+          value: { value: excelDate(payload.feeTier.since) || "", format: "date" },
+          note: "",
+        },
+      ];
 
-      await downloadWorkbook(`laporan-keuangan-seller-${reportDate()}.xlsx`, workbook);
+      const sheets: Array<TableSpec | SummarySpec> = [
+        {
+          kind: "summary",
+          name: "Ringkasan",
+          title: "Ringkasan Keuangan Seller",
+          lines,
+          widths: [56, 22, 48],
+        },
+        {
+          kind: "table",
+          name: "Detail Transaksi",
+          title: "Detail Transaksi",
+          subtitle: "Pesanan valid (Dibayar, Dikirim, Selesai)",
+          columns: [
+            { header: "No", width: 6, format: "number", align: "center" },
+            { header: "Tanggal", width: 16, format: "date", align: "center" },
+            { header: "No. Pesanan", width: 24 },
+            { header: "Produk", width: 34 },
+            { header: "Qty", width: 8, format: "number", align: "center" },
+            { header: "Harga Satuan", width: 18, format: "currency" },
+            { header: "Penjualan Kotor", width: 20, format: "currency" },
+            { header: "Tarif Fee", width: 12, format: "percent", align: "center" },
+            { header: "Fee Admin", width: 18, format: "currency" },
+            { header: "Pendapatan Bersih", width: 20, format: "currency" },
+            { header: "Status Pesanan", width: 18 },
+            { header: "Status Dana", width: 16 },
+            { header: "Estimasi Cair", width: 16, format: "date", align: "center" },
+          ],
+          rows: transactionRows,
+          total: (row) => [
+            "TOTAL",
+            null,
+            null,
+            null,
+            `=SUM(E8:E${row - 1})`,
+            null,
+            `=SUM(G8:G${row - 1})`,
+            null,
+            `=-SUM(I8:I${row - 1})`,
+            `=SUM(J8:J${row - 1})`,
+            null,
+            null,
+            null,
+          ],
+        },
+        {
+          kind: "table",
+          name: "Riwayat Penarikan Dana",
+          title: "Riwayat Penarikan Dana",
+          subtitle: "Penarikan dana seller",
+          columns: [
+            { header: "Tanggal", width: 16, format: "date", align: "center" },
+            { header: "Status", width: 14, align: "center" },
+            { header: "Bank", width: 20 },
+            { header: "No. Rekening", width: 20 },
+            { header: "Jumlah", width: 20, format: "currency" },
+            { header: "Catatan", width: 36 },
+          ],
+          rows: withdrawalRows,
+          total: (row) => ["TOTAL", null, null, null, `=SUM(E8:E${row - 1})`, null],
+        },
+      ];
+
+      const workbook = buildWorkbook(meta, sheets);
+      await downloadWorkbook(`laporan-keuangan-seller-${today}.xlsx`, workbook);
     } finally {
       setDownloading(false);
     }
@@ -416,6 +602,13 @@ export default function Finance() {
           </div>
         ) : null}
 
+        {withdrawalBlocked ? (
+          <div className="mb-5 rounded-xl border border-[#FECACA] bg-[#FDECEC] px-4 py-3 text-sm text-[#B91C1C]">
+            <p className="font-bold">{t("sellerFinance.deficitStat")}: {formatRupiah(data.summary.deficit)}</p>
+            <p className="mt-0.5">{t("sellerFinance.deficitNotice")}</p>
+          </div>
+        ) : null}
+
         <div className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
           <div className="relative overflow-hidden rounded-2xl bg-seller-navy p-8 text-white xl:col-span-2">
             <p className="text-[11px] font-semibold tracking-[0.16em] text-[#9DB4E8]">{t("seller.activeBalance")}</p>
@@ -428,7 +621,9 @@ export default function Finance() {
               <button
                 type="button"
                 onClick={openModal}
-                className="flex items-center gap-2 rounded-xl bg-seller-orange px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-105"
+                disabled={withdrawalBlocked}
+                title={withdrawalBlocked ? t("seller.withdrawBlockedDeficit") : undefined}
+                className="flex items-center gap-2 rounded-xl bg-seller-orange px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Wallet size={16} /> {t("seller.withdraw")}
               </button>
@@ -449,15 +644,12 @@ export default function Finance() {
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#E8F0FE] text-[#3B5B8C]">
                   <Hourglass size={18} />
                 </span>
-                <span className="rounded-full bg-[#EEF1F6] px-2.5 py-0.5 text-xs font-semibold text-seller-muted">
-                  {t("sellerFinance.months", { count: data.feeTier.tenureMonths })}
-                </span>
               </div>
-              <p className="text-sm text-seller-muted">{t("seller.pendingPayout")}</p>
+              <p className="text-sm text-seller-muted">{t("sellerFinance.pendingBalanceDetailed")}</p>
               <p className="mt-1 text-xl font-bold text-seller-ink">
                 {loading ? "…" : formatRupiah(data.summary.pendingBalance)}
               </p>
-              <p className="mt-1 text-xs text-seller-muted">{t("seller.fromCompletedOrders")}</p>
+              <p className="mt-1 text-xs text-seller-muted">{t("sellerFinance.pendingEscrowNote")}</p>
             </div>
 
             <div className="rounded-2xl border border-[#E8ECF3] bg-white p-5">
@@ -466,14 +658,14 @@ export default function Finance() {
                   <TrendingUp size={18} />
                 </span>
                 <span className="rounded-full bg-[#FFF4E5] px-2.5 py-0.5 text-xs font-bold text-seller-orange">
-                  -{formatRupiah(data.summary.totalFees)}
+                  {t("sellerFinance.adminFeeSnapshot")}: -{formatRupiah(data.summary.totalFees)}
                 </span>
               </div>
-              <p className="text-sm text-seller-muted">{t("seller.totalRevenueYtd")}</p>
+              <p className="text-sm text-seller-muted">{t("sellerFinance.grossSales")}</p>
               <p className="mt-1 text-xl font-bold text-seller-ink">
-                {loading ? "…" : formatRupiah(data.summary.totalRevenue)}
+                {loading ? "…" : formatRupiah(data.summary.gross || data.summary.totalRevenue)}
               </p>
-              <p className="mt-1 text-xs text-seller-muted">{t("seller.yearToDate")}</p>
+              <p className="mt-1 text-xs text-seller-muted">{t("sellerFinance.grossNote")}</p>
             </div>
           </div>
         </div>
@@ -492,9 +684,11 @@ export default function Finance() {
             <p className="mt-1 text-lg font-bold text-seller-ink">{formatRupiah(data.summary.platformCredits)}</p>
             <p className="mt-0.5 text-[11px] text-seller-muted">{t("seller.platformCreditDesc")}</p>
           </div>
-          <div className="rounded-2xl border border-[#E8ECF3] bg-white px-5 py-4">
-            <p className="text-xs font-medium text-seller-muted">{t("sellerFinance.soldQty")}</p>
-            <p className="mt-1 text-lg font-bold text-seller-ink">{data.feeTier.soldQty}</p>
+          <div className={`rounded-2xl border bg-white px-5 py-4 ${withdrawalBlocked ? "border-[#FECACA]" : "border-[#E8ECF3]"}`}>
+            <p className="text-xs font-medium text-seller-muted">{t("sellerFinance.deficitStat")}</p>
+            <p className={`mt-1 text-lg font-bold ${withdrawalBlocked ? "text-[#E11D48]" : "text-seller-ink"}`}>
+              {formatRupiah(data.summary.deficit)}
+            </p>
           </div>
         </div>
 
@@ -511,9 +705,13 @@ export default function Finance() {
             </div>
             <div className="rounded-xl bg-seller-navy px-5 py-3 text-center text-white">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-[#9DB4E8]">
-                {t("sellerFinance.currentRate")}
+                {t("sellerFinance.currentRateNew")}
               </p>
               <p className="mt-0.5 text-2xl font-bold">{formatPercent(data.feeTier.rate)}</p>
+              <p className="mt-1 text-[10px] text-[#9DB4E8]">{t("sellerFinance.feeSnapshotNote")}</p>
+              <p className="mt-0.5 text-[10px] text-[#9DB4E8]">
+                {t("sellerFinance.sellingSince", { date: formatWibDate(data.feeTier.since) })}
+              </p>
             </div>
           </div>
 
@@ -544,7 +742,9 @@ export default function Finance() {
             <button
               type="button"
               onClick={openModal}
-              className="flex items-center gap-2 rounded-xl bg-seller-navy px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+              disabled={withdrawalBlocked}
+              title={withdrawalBlocked ? t("seller.withdrawBlockedDeficit") : undefined}
+              className="flex items-center gap-2 rounded-xl bg-seller-navy px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <ArrowDownToLine size={15} /> {t("seller.withdraw")}
             </button>
@@ -622,35 +822,63 @@ export default function Finance() {
                     <th className="px-4 py-3 font-semibold">{t("sellerFinance.gross")}</th>
                     <th className="px-4 py-3 font-semibold">{t("sellerFinance.fee")}</th>
                     <th className="px-4 py-3 font-semibold">{t("sellerFinance.net")}</th>
-                    <th className="px-4 py-3 font-semibold">{t("admin.status")}</th>
+                    <th className="px-4 py-3 font-semibold">{t("sellerFinance.orderStatus")}</th>
+                    <th className="px-4 py-3 font-semibold">{t("sellerFinance.fundStatus")}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.map((row, index) => (
-                    <tr key={row.id} className={index % 2 === 1 ? "bg-[#F7F9FC]" : "bg-white"}>
-                      <td className="px-4 py-4 font-semibold text-seller-ink">{row.order_number}</td>
-                      <td className="whitespace-nowrap px-4 text-seller-muted">{formatDate(row.date)}</td>
-                      <td className="px-4 text-seller-ink/80">
-                        {row.product_name}
-                        <span className="block text-xs text-seller-muted">
-                          {row.qty}× · {formatPercent(row.fee_rate)}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-4 font-medium text-seller-ink">{formatRupiah(row.gross)}</td>
-                      <td className="whitespace-nowrap px-4 font-medium text-[#E11D48]">-{formatRupiah(row.fee)}</td>
-                      <td className="whitespace-nowrap px-4 font-semibold text-seller-ink">{formatRupiah(row.net)}</td>
-                      <td className="px-4">
-                        <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-                            row.status === "settled" ? "bg-[#E9F8EF] text-[#16A34A]" : "bg-[#EEEAF6] text-[#6B6280]"
-                          }`}
-                        >
-                          {row.status === "settled" ? <Check size={12} /> : <Clock size={12} />}
-                          {row.status === "settled" ? t("sellerFinance.statusSettled") : t("sellerFinance.statusPending")}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {transactions.map((row, index) => {
+                    const settled = row.order_status === "completed" || (!row.order_status && row.status === "settled");
+                    const orderStatusLabel =
+                      row.order_status_label ||
+                      (row.order_status === "completed"
+                        ? t("seller.completed")
+                        : row.order_status === "shipped"
+                          ? t("profile.orderShipped")
+                          : row.order_status === "paid"
+                            ? t("adminFinance.statusPaid")
+                            : !row.order_status && row.status === "settled"
+                              ? t("sellerFinance.statusSettled")
+                              : t("sellerFinance.statusPending"));
+                    const fundStatusLabel =
+                      row.fund_status || (settled ? t("sellerFinance.fundAvailable") : t("sellerFinance.fundHeld"));
+                    return (
+                      <tr key={row.id} className={index % 2 === 1 ? "bg-[#F7F9FC]" : "bg-white"}>
+                        <td className="px-4 py-4 font-semibold text-seller-ink">{row.order_number}</td>
+                        <td className="whitespace-nowrap px-4 text-seller-muted">{formatTransactionDate(row.date)}</td>
+                        <td className="px-4 text-seller-ink/80">
+                          {row.product_name}
+                          <span className="block text-xs text-seller-muted">
+                            {row.category ? `${row.category} · ` : ""}
+                            {t("sellerFinance.unitPrice")} {formatRupiah(row.unit_price || 0)} · {row.qty}× ·{" "}
+                            {t("sellerFinance.fee")} {formatPercent(row.fee_rate)}
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-4 font-medium text-seller-ink">{formatRupiah(row.gross)}</td>
+                        <td className="whitespace-nowrap px-4 font-medium text-[#E11D48]">-{formatRupiah(row.fee)}</td>
+                        <td className="whitespace-nowrap px-4 font-semibold text-seller-ink">{formatRupiah(row.net)}</td>
+                        <td className="px-4">
+                          <span
+                            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${
+                              settled ? "bg-[#E9F8EF] text-[#16A34A]" : "bg-[#E8F0FE] text-[#2563EB]"
+                            }`}
+                          >
+                            {settled ? <Check size={12} /> : <Clock size={12} />}
+                            {orderStatusLabel}
+                          </span>
+                        </td>
+                        <td className="px-4">
+                          <span
+                            className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${
+                              settled ? "bg-[#E9F8EF] text-[#15803D]" : "bg-[#FFF4E5] text-[#C2410C]"
+                            }`}
+                          >
+                            {fundStatusLabel}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

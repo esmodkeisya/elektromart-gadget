@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import TopBar from "../components/TopBar";
 import { api } from "@/lib/api";
-import { buildWorkbook, downloadWorkbook, reportDate } from "@/lib/report";
+import { buildWorkbook, downloadWorkbook, excelDate, reportDate, reportDateTime } from "@/lib/report";
+import type { CellValue, ReportMeta, SummaryLine, SummarySpec, TableSpec } from "@/lib/report";
 import { useLanguage } from "@/lib/i18n";
 
 type AdminFinanceTransaction = {
@@ -32,6 +33,8 @@ type AdminFinanceTransaction = {
   net: number;
   total: number;
   status: string;
+  status_label?: string;
+  fund_status?: string;
   date: string;
   payment_method: string | null;
 };
@@ -44,6 +47,7 @@ type AdminLedgerEntry = {
   type: string;
   amount: number;
   status: string;
+  status_label?: string;
   description: string | null;
   created_at: string;
 };
@@ -83,41 +87,67 @@ type PayoutRecipient = {
 type AdminFinanceResponse = {
   summary: {
     grossVolume: number;
+    gmv: number;
+    shipping: number;
     platformRevenue: number;
     settledRevenue: number;
     heldRevenue: number;
     escrowHeldFunds: number;
+    totalSellerNet: number;
     totalPayoutToSellers: number;
     revenueOrders: number;
     totalOrders: number;
+    validOrders: number;
+    activeOrders: number;
+    completedOrders: number;
+    cancelledOrders: number;
+    waitingOrders: number;
+    units: number;
     ordersThisMonth: number;
     pendingWithdrawalAmount: number;
     completedWithdrawalAmount: number;
+    sellerAvailableBalance: number;
+    sellerDeficit: number;
     totalPlatformPayouts: number;
     availablePlatformBalance: number;
+    platformDeficit: number;
+    ledgerFee: number;
   };
   transactions: AdminFinanceTransaction[];
   ledger: AdminLedgerEntry[];
   withdrawals: AdminWithdrawal[];
   payouts: PlatformPayout[];
-  feeTiers: { rate: number; label: string }[];
+  feeTiers: { rate: number; label: string; condition: string }[];
 };
 
 const EMPTY: AdminFinanceResponse = {
   summary: {
     grossVolume: 0,
+    gmv: 0,
+    shipping: 0,
     platformRevenue: 0,
     settledRevenue: 0,
     heldRevenue: 0,
     escrowHeldFunds: 0,
+    totalSellerNet: 0,
     totalPayoutToSellers: 0,
     revenueOrders: 0,
     totalOrders: 0,
+    validOrders: 0,
+    activeOrders: 0,
+    completedOrders: 0,
+    cancelledOrders: 0,
+    waitingOrders: 0,
+    units: 0,
     ordersThisMonth: 0,
     pendingWithdrawalAmount: 0,
     completedWithdrawalAmount: 0,
+    sellerAvailableBalance: 0,
+    sellerDeficit: 0,
     totalPlatformPayouts: 0,
     availablePlatformBalance: 0,
+    platformDeficit: 0,
+    ledgerFee: 0,
   },
   transactions: [],
   ledger: [],
@@ -158,13 +188,6 @@ const WITHDRAWAL_KEY: Record<string, string> = {
   processing: "admin.withdrawalProcessing",
   completed: "admin.withdrawalCompleted",
   rejected: "admin.withdrawalRejected",
-};
-
-const FEE_TIER_KEY: Record<string, string> = {
-  "0.02": "adminFinance.tierNew",
-  "0.03": "adminFinance.tierGrowing",
-  "0.04": "adminFinance.tierEstablished",
-  "0.05": "adminFinance.tierHighVolume",
 };
 
 function formatRupiah(value: number) {
@@ -348,202 +371,349 @@ export default function AdminKeuangan() {
     () => withdrawals.filter((row) => row.status === "pending" || row.status === "processing"),
     [withdrawals]
   );
+  const sellerDeficit = Number(data.summary.sellerDeficit) || 0;
 
   async function handleDownload() {
     setDownloading(true);
     try {
-      const txSheet = t("adminReport.transactions") || "Detail Transaksi";
-      const wdSheet = t("adminReport.withdrawals") || "Penarikan Seller";
-      const poSheet = t("adminReport.payouts") || "Pencairan Platform";
-      const ledgerSheet = t("adminReport.ledger") || "Buku Besar";
-      const range = (sheet: string, col: string, totalRow: number) => `'${sheet}'!${col}5:${col}${Math.max(totalRow - 1, 5)}`;
-      const cell = (sheet: string, col: string, totalRow: number) => `'${sheet}'!${col}${totalRow}`;
+      type ExportAdminFinance = {
+        summary: {
+          grossVolume: number;
+          gmv: number;
+          shipping: number;
+          platformRevenue: number;
+          settledRevenue: number;
+          heldRevenue: number;
+          escrowHeldFunds: number;
+          totalSellerNet: number;
+          completedWithdrawalAmount: number;
+          pendingWithdrawalAmount: number;
+          sellerAvailableBalance: number;
+          sellerDeficit: number;
+          totalPlatformPayouts: number;
+          availablePlatformBalance: number;
+          platformDeficit: number;
+          ledgerFee: number;
+          gross?: number;
+          revenueOrders: number;
+          totalOrders: number;
+          validOrders: number;
+          activeOrders: number;
+          completedOrders: number;
+          cancelledOrders: number;
+          waitingOrders: number;
+          ordersThisMonth: number;
+          units: number;
+        };
+        transactions: Array<{
+          order_number: string;
+          date: string;
+          seller_name: string;
+          buyer_name: string;
+          product_name: string;
+          qty: number;
+          gross: number;
+          shipping_fee: number;
+          insurance_fee: number;
+          packing_fee: number;
+          gmv: number;
+          fee_rate: number;
+          fee: number;
+          net: number;
+          status_label: string;
+          fund_status: string;
+          payment_method: string;
+          courier: string;
+        }>;
+        ledger: Array<{
+          date: string;
+          order_number: string | null;
+          seller_name: string;
+          type: string;
+          amount: number;
+          status_label: string;
+          status?: string;
+          description: string | null;
+        }>;
+        withdrawals: Array<{
+          requested_at: string;
+          seller_name: string;
+          amount: number;
+          status: string;
+          bank_name: string | null;
+          account_number: string | null;
+        }>;
+        payouts: Array<{
+          created_at: string;
+          recipient_name: string;
+          amount: number;
+          status: string;
+          note: string | null;
+        }>;
+        feeTiers: Array<{ rate: number; label: string; condition: string }>;
+      };
 
-      const tx = data.transactions || [];
-      const wd = data.withdrawals || [];
-      const po = data.payouts || [];
-      const ledger = data.ledger || [];
-      const txTotal = 5 + tx.length;
-      const wdTotal = 5 + wd.length;
-      const poTotal = 5 + po.length;
-      const ledgerTotal = 5 + ledger.length;
-      // Rumus lintas sheet dipakai hanya saat sheet punya baris; jika kosong,
-      // pakai 0 agar tidak mereferensi header/total yang tidak ada.
-      const txTotalCell = (col: string) => (tx.length ? cell(txSheet, col, txTotal) : "0");
-      const poTotalCell = (col: string) => (po.length ? cell(poSheet, col, poTotal) : "0");
+      const payload = await api<ExportAdminFinance>("/api/finance/admin");
+      const s = payload.summary;
+      const today = reportDate();
+      const gross = Number(s.gross ?? s.grossVolume ?? 0);
+      const txGross = payload.transactions.reduce((sum, row) => sum + Number(row.gross || 0), 0);
+      const grossMatches = Math.round(txGross) === Math.round(gross);
+      const ledgerMatches = Math.round(s.ledgerFee) === Math.round(s.platformRevenue);
+      const withdrawalStatus = (status: string) => {
+        const labels: Record<string, string> = {
+          completed: "Berhasil",
+          processing: "Diproses",
+          pending: "Menunggu",
+          rejected: "Ditolak",
+        };
+        return labels[status] || status;
+      };
 
-      const summaryRows = (value: string | number, format: "currency" | "number", note = "") => [
-        value,
-        { value, format },
-        note,
-      ];
+      const meta: ReportMeta = {
+        title: "Laporan Keuangan Platform",
+        platform: "ElektroMart",
+        subject: "Seluruh Platform",
+        period: { from: today, to: today },
+        generatedAt: reportDateTime(),
+        notes: [
+          "Hanya pesanan valid (Dibayar, Dikirim, Selesai) yang dihitung.",
+          "Fee platform mengikuti snapshot tarif pada saat transaksi.",
+        ],
+        currency: "Rupiah (Rp)",
+      };
 
-      const workbook = buildWorkbook(
-        {
-          title: `${t("adminReport.financeTitle")} — ElektroMart`,
-          subtitle: `${t("adminReport.generatedAt")}: ${new Date().toLocaleString("id-ID", {
-            day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-          })}`,
-          generatedLabel: t("adminReport.generatedAt"),
-        },
-        [
-          {
-            name: t("adminReport.summary"),
-            title: t("adminReport.financeTitle"),
-            subtitle: "ElektroMart",
-            columns: [
-              { header: t("adminReport.metric"), width: 34 },
-              { header: t("adminReport.value"), width: 22 },
-              { header: t("adminReport.note"), width: 46 },
-            ],
-            rows: [
-              [t("adminFinance.grossVolume"), { value: `=${txTotalCell("E")}`, format: "currency" }, t("adminReport.fromTransactions")],
-              [t("adminFinance.platformRevenue"), { value: `=${txTotalCell("F")}`, format: "currency" }, t("adminReport.fromTransactions")],
-              [t("adminFinance.settledRevenue"), ...summaryRows(data.summary.settledRevenue, "currency")],
-              [t("adminFinance.heldRevenue"), ...summaryRows(data.summary.heldRevenue, "currency")],
-              [t("admin.totalEscrowHeld"), ...summaryRows(data.summary.escrowHeldFunds, "currency")],
-              [t("admin.totalPayoutToSellers"), { value: `=${txTotalCell("G")}`, format: "currency" }, t("adminReport.fromTransactions")],
-              [t("adminReport.totalOrder"), ...summaryRows(data.summary.totalOrders, "number")],
-              [t("adminFinance.revenueOrders"), { value: tx.length ? `=COUNTA(${range(txSheet, "C", txTotal)})` : 0, format: "number" }, t("adminReport.fromTransactions")],
-              [t("admin.orders"), ...summaryRows(data.summary.ordersThisMonth, "number")],
-              [t("admin.pendingWithdrawals"), ...summaryRows(data.summary.pendingWithdrawalAmount, "currency")],
-              [t("admin.withdrawalApprove"), ...summaryRows(data.summary.completedWithdrawalAmount, "currency")],
-              [t("admin.totalPlatformPayouts"), { value: `=${poTotalCell("D")}`, format: "currency" }, t("adminReport.fromPayouts")],
-              [t("admin.platformAvailable"), { value: `=${txTotalCell("F")}-${poTotalCell("D")}`, format: "currency" }, t("adminReport.fromPayouts")],
-            ],
-          },
-          {
-            name: txSheet,
-            title: t("adminReport.transactions"),
-            subtitle: t("adminReport.financeTitle"),
-            columns: [
-              { header: t("adminReport.no"), width: 6, format: "number" },
-              { header: t("adminReport.date"), width: 20 },
-              { header: t("adminReport.order"), width: 20 },
-              { header: t("adminReport.seller"), width: 28 },
-              { header: t("adminReport.gross"), width: 18, format: "currency" },
-              { header: t("adminReport.fee"), width: 18, format: "currency" },
-              { header: t("adminReport.net"), width: 18, format: "currency", formula: (r) => `E${r}-F${r}` },
-              { header: t("adminReport.totalOrder"), width: 18, format: "currency" },
-              { header: t("adminReport.status"), width: 16 },
-              { header: t("adminReport.paymentMethod"), width: 20 },
-            ],
-            rows: tx.map((row, index) => [
-              index + 1,
-              formatDate(row.date),
-              row.order_number,
-              row.seller,
-              row.gross,
-              row.fee,
-              null,
-              row.total,
-              STATUS_KEY[row.status] ? t(STATUS_KEY[row.status]) : row.status,
-              row.payment_method || "-",
-            ]),
-            total: (r) => [
-              { value: t("adminReport.total"), format: "text" }, "", "", "",
-              `=SUM(E5:E${Math.max(r - 1, 5)})`,
-              `=SUM(F5:F${Math.max(r - 1, 5)})`,
-              `=SUM(G5:G${Math.max(r - 1, 5)})`,
-              `=SUM(H5:H${Math.max(r - 1, 5)})`, "", "",
-            ],
-          },
-          {
-            name: wdSheet,
-            title: t("adminReport.withdrawals"),
-            subtitle: t("adminReport.financeTitle"),
-            columns: [
-              { header: t("adminReport.date"), width: 20 },
-              { header: t("adminReport.seller"), width: 26 },
-              { header: t("adminReport.bank"), width: 18 },
-              { header: t("adminReport.account"), width: 22 },
-              { header: t("adminReport.amount"), width: 18, format: "currency" },
-              { header: t("adminReport.status"), width: 16 },
-              { header: t("adminReport.note"), width: 34 },
-            ],
-            rows: wd.map((row) => [
-              formatDate(row.requested_at || row.created_at),
-              row.seller_name,
-              row.bank_name || "-",
-              maskNumber(row.account_number),
-              row.amount,
-              WITHDRAWAL_KEY[row.status] ? t(WITHDRAWAL_KEY[row.status]) : row.status,
-              row.note || "",
-            ]),
-            total: (r) => [
-              { value: t("adminReport.total"), format: "text" }, "", "", "",
-              `=SUM(E5:E${Math.max(r - 1, 5)})`, "", "",
-            ],
-          },
-          {
-            name: poSheet,
-            title: t("adminReport.payouts"),
-            subtitle: t("adminReport.financeTitle"),
-            columns: [
-              { header: t("adminReport.date"), width: 20 },
-              { header: t("adminReport.recipient"), width: 26 },
-              { header: t("adminReport.recipientType"), width: 18 },
-              { header: t("adminReport.amount"), width: 18, format: "currency" },
-              { header: t("adminReport.note"), width: 40 },
-            ],
-            rows: po.map((row) => [
-              formatDate(row.created_at),
-              row.recipient_name,
-              t(row.recipient_role === "seller" ? "adminReport.roleSeller" : "adminReport.roleBuyer"),
-              row.amount,
-              row.note || "",
-            ]),
-            total: (r) => [
-              { value: t("adminReport.total"), format: "text" }, "", "",
-              `=SUM(D5:D${Math.max(r - 1, 5)})`, "",
-            ],
-          },
-          {
-            name: ledgerSheet,
-            title: t("adminReport.ledger"),
-            subtitle: t("adminReport.financeTitle"),
-            columns: [
-              { header: t("adminReport.date"), width: 20 },
-              { header: t("adminReport.order"), width: 20 },
-              { header: t("adminReport.type"), width: 18 },
-              { header: t("adminReport.amount"), width: 18, format: "currency" },
-              { header: t("adminReport.status"), width: 16 },
-              { header: t("adminReport.description"), width: 44 },
-            ],
-            rows: ledger.map((row) => [
-              formatDate(row.created_at),
+      const transactionRows: CellValue[][] = payload.transactions.length
+        ? payload.transactions.map((row) => [
+            excelDate(row.date),
+            row.order_number,
+            row.seller_name,
+            row.buyer_name,
+            row.product_name,
+            Number(row.gross || 0),
+            Number(row.shipping_fee || 0),
+            Number(row.fee_rate || 0),
+            Number(row.fee || 0),
+            Number(row.net || 0),
+            Number(row.gmv || 0),
+            row.status_label,
+            row.fund_status,
+            row.payment_method || "-",
+          ])
+        : [["Tidak ada transaksi pada periode ini."]];
+
+      const withdrawalRows: CellValue[][] = payload.withdrawals.length
+        ? payload.withdrawals.map((row) => [
+            excelDate(row.requested_at),
+            row.seller_name,
+            row.bank_name || "-",
+            maskNumber(row.account_number),
+            withdrawalStatus(row.status),
+            Number(row.amount || 0),
+          ])
+        : [["Tidak ada penarikan pada periode ini."]];
+
+      const payoutRows: CellValue[][] = payload.payouts.length
+        ? payload.payouts.map((row) => [
+            excelDate(row.created_at),
+            row.recipient_name,
+            withdrawalStatus(row.status),
+            Number(row.amount || 0),
+            row.note || "",
+          ])
+        : [["Belum ada pencairan platform."]];
+
+      const ledgerRows = payload.ledger.filter(
+        (row) => String(row.status_label || "") !== "Dibatalkan" && String(row.status || "") !== "cancelled"
+      );
+      const ledgerData: CellValue[][] = ledgerRows.length
+        ? ledgerRows.map((row) => {
+            const amount = Number(row.amount || 0);
+            return [
+              excelDate(row.date),
               row.order_number || "-",
               row.type,
-              row.amount,
-              row.status === "held"
-                ? t("adminFinance.statusHeld")
-                : row.status === "settled"
-                  ? t("adminFinance.statusSettled")
-                  : t("adminFinance.statusCancelled"),
+              row.seller_name,
+              amount > 0 ? amount : 0,
+              amount < 0 ? amount : 0,
+              row.status_label,
               row.description || "",
-            ]),
-            total: (r) => [
-              { value: t("adminReport.total"), format: "text" }, "", "",
-              `=SUM(D5:D${Math.max(r - 1, 5)})`, "", "",
-            ],
-          },
-          {
-            name: t("adminReport.feeTiers"),
-            title: t("adminReport.feeTiers"),
-            subtitle: t("adminReport.financeTitle"),
-            columns: [
-              { header: t("adminReport.tier"), width: 40 },
-              { header: t("adminReport.rate"), width: 16, format: "percent" },
-            ],
-            rows: data.feeTiers.map((tier) => [
-              FEE_TIER_KEY[String(tier.rate)] ? t(FEE_TIER_KEY[String(tier.rate)]) : tier.label,
-              tier.rate,
-            ]),
-          },
-        ]
-      );
+            ];
+          })
+        : [["Tidak ada catatan buku besar pada periode ini."]];
 
-      await downloadWorkbook(`laporan-keuangan-admin-${reportDate()}.xlsx`, workbook);
+      const feeTierRows: CellValue[][] = payload.feeTiers.length
+        ? payload.feeTiers.map((tier) => [Number(tier.rate || 0), tier.label, tier.condition])
+        : [["Tidak ada tingkatan fee."]];
+
+      const difference = (value: number) =>
+        `Selisih ${formatRupiah(Math.abs(value))}`;
+
+      const lines: SummaryLine[] = [
+        { kind: "section", label: "1. Arus Transaksi", value: s.gmv },
+        { kind: "detail", label: "GMV", value: s.gmv, note: "" },
+        { kind: "detail", label: "Ongkir", value: s.shipping, note: "" },
+        { kind: "detail", label: "Penjualan Kotor", value: gross, note: "" },
+        { kind: "detail", label: "(GMV = kotor + ongkir + asuransi + packing)", note: "Rumus rujukan" },
+        { kind: "spacer" },
+        { kind: "section", label: "2. Pendapatan Platform", value: s.platformRevenue },
+        { kind: "detail", label: "Fee Platform", value: s.platformRevenue, note: "" },
+        { kind: "detail", label: "  Settled", value: s.settledRevenue, note: "" },
+        { kind: "detail", label: "  Ditahan", value: s.heldRevenue, note: "" },
+        {
+          kind: "detail",
+          label: "Fee di Buku Besar (Ditahan+Settled)",
+          value: s.ledgerFee,
+          note: "Sesuai buku besar",
+        },
+        {
+          kind: "check",
+          label: "Fee Buku Besar = Fee Platform",
+          value: ledgerMatches ? "OK" : difference(s.ledgerFee - s.platformRevenue),
+        },
+        { kind: "spacer" },
+        { kind: "section", label: "3. Kewajiban ke Seller", value: s.escrowHeldFunds },
+        { kind: "detail", label: "Total Pendapatan Seller", value: s.totalSellerNet, note: "" },
+        { kind: "detail", label: "Escrow (Dibayar+Dikirim)", value: s.escrowHeldFunds, note: "" },
+        { kind: "detail", label: "Total Dicairkan", value: -s.completedWithdrawalAmount, note: "" },
+        { kind: "detail", label: "Penarikan Diproses", value: -s.pendingWithdrawalAmount, note: "" },
+        { kind: "subtotal", label: "Saldo Aktif Seller", value: s.sellerAvailableBalance },
+        { kind: "detail", label: "Saldo Minus Seller", value: s.sellerDeficit, note: "" },
+        { kind: "spacer" },
+        { kind: "section", label: "4. Pencairan Platform" },
+        { kind: "detail", label: "Disalurkan", value: -s.totalPlatformPayouts, note: "" },
+        { kind: "subtotal", label: "Saldo Pendapatan Platform", value: s.availablePlatformBalance },
+        { kind: "spacer" },
+        { kind: "detail", label: "Pesanan Valid", value: { value: s.validOrders, format: "number" }, note: "" },
+        { kind: "detail", label: "Pesanan Dibatalkan", value: { value: s.cancelledOrders, format: "number" }, note: "" },
+        {
+          kind: "check",
+          label: "Penjualan Kotor = kotor S-KEU",
+          value: grossMatches ? "OK" : difference(txGross - gross),
+        },
+      ];
+
+      const sheets: Array<TableSpec | SummarySpec> = [
+        {
+          kind: "summary",
+          name: "Ringkasan",
+          title: "Ringkasan Keuangan Platform",
+          lines,
+          widths: [56, 22, 48],
+        },
+        {
+          kind: "table",
+          name: "Detail Transaksi",
+          title: "Detail Transaksi",
+          subtitle: "Pesanan valid (Dibayar, Dikirim, Selesai)",
+          columns: [
+            { header: "Tanggal", width: 16, format: "date", align: "center" },
+            { header: "No. Pesanan", width: 24 },
+            { header: "Toko", width: 26 },
+            { header: "Pembeli", width: 24 },
+            { header: "Produk", width: 32 },
+            { header: "Kotor", width: 18, format: "currency" },
+            { header: "Ongkir", width: 18, format: "currency" },
+            { header: "Tarif", width: 12, format: "percent", align: "center" },
+            { header: "Fee Platform", width: 18, format: "currency" },
+            { header: "Pendapatan Seller", width: 20, format: "currency" },
+            { header: "Total Bayar", width: 20, format: "currency" },
+            { header: "Status Pesanan", width: 18 },
+            { header: "Status Dana", width: 16 },
+            { header: "Metode Pembayaran", width: 20 },
+          ],
+          rows: transactionRows,
+          total: (row) => [
+            "TOTAL",
+            null,
+            null,
+            null,
+            null,
+            `=SUM(F8:F${row - 1})`,
+            `=SUM(G8:G${row - 1})`,
+            null,
+            `=SUM(I8:I${row - 1})`,
+            `=SUM(J8:J${row - 1})`,
+            `=SUM(K8:K${row - 1})`,
+            null,
+            null,
+            null,
+          ],
+        },
+        {
+          kind: "table",
+          name: "Penarikan Seller",
+          title: "Penarikan Seller",
+          subtitle: "Permintaan penarikan seller",
+          columns: [
+            { header: "Tanggal", width: 16, format: "date", align: "center" },
+            { header: "Seller", width: 26 },
+            { header: "Bank", width: 18 },
+            { header: "No. Rekening", width: 20 },
+            { header: "Status", width: 14, align: "center" },
+            { header: "Jumlah", width: 20, format: "currency" },
+          ],
+          rows: withdrawalRows,
+          total: (row) => ["TOTAL", null, null, null, null, `=SUM(F8:F${row - 1})`],
+        },
+        {
+          kind: "table",
+          name: "Pencairan Platform",
+          title: "Pencairan Platform",
+          subtitle: "Pencairan pendapatan platform",
+          columns: [
+            { header: "Tanggal", width: 16, format: "date", align: "center" },
+            { header: "Penerima", width: 26 },
+            { header: "Status", width: 14, align: "center" },
+            { header: "Jumlah", width: 20, format: "currency" },
+            { header: "Catatan", width: 36 },
+          ],
+          rows: payoutRows,
+          total: (row) => ["TOTAL", null, null, `=SUM(D8:D${row - 1})`, null],
+        },
+        {
+          kind: "table",
+          name: "Buku Besar",
+          title: "Buku Besar",
+          subtitle: "Mutasi fee platform",
+          columns: [
+            { header: "Tanggal", width: 16, format: "date", align: "center" },
+            { header: "No. Pesanan", width: 24 },
+            { header: "Jenis", width: 22 },
+            { header: "Seller", width: 26 },
+            { header: "Debit", width: 18, format: "currency" },
+            { header: "Kredit", width: 18, format: "currency" },
+            { header: "Status", width: 14, align: "center" },
+            { header: "Keterangan", width: 40 },
+          ],
+          rows: ledgerData,
+          total: (row) => [
+            "TOTAL",
+            null,
+            null,
+            null,
+            `=SUM(E8:E${row - 1})`,
+            `=SUM(F8:F${row - 1})`,
+            null,
+            null,
+          ],
+        },
+        {
+          kind: "table",
+          name: "Tingkatan Fee",
+          title: "Tingkatan Fee",
+          subtitle: "Tarif fee seller",
+          columns: [
+            { header: "Tarif", width: 12, format: "percent", align: "center" },
+            { header: "Label", width: 26 },
+            { header: "Syarat Tingkat", width: 48 },
+          ],
+          rows: feeTierRows,
+        },
+      ];
+
+      const workbook = buildWorkbook(meta, sheets);
+      await downloadWorkbook(`laporan-keuangan-admin-${today}.xlsx`, workbook);
     } finally {
       setDownloading(false);
     }
@@ -590,10 +760,13 @@ export default function AdminKeuangan() {
                 {data.summary.revenueOrders} {t("adminFinance.revenueOrders").toLowerCase()}
               </span>
             </div>
-            <p className="text-sm text-admin-muted">{t("adminFinance.grossVolume")}</p>
+            <p className="text-sm text-admin-muted">{t("adminFinance.grossSales")}</p>
             <p className="mt-1 text-2xl font-bold text-admin-ink">{formatRupiah(data.summary.grossVolume)}</p>
             <p className="mt-1 text-xs text-admin-muted">
-              {data.summary.ordersThisMonth} {t("admin.orders").toLowerCase()}
+              {t("adminFinance.gmvNote", { amount: formatRupiah(data.summary.gmv) })}
+            </p>
+            <p className="mt-0.5 text-xs text-admin-muted">
+              {data.summary.ordersThisMonth} {t("admin.validOrdersThisMonth")}
             </p>
           </div>
 
@@ -606,11 +779,14 @@ export default function AdminKeuangan() {
                 {t("adminFinance.settledRevenue")}
               </span>
             </div>
-            <p className="text-sm text-white/70">{t("adminFinance.platformRevenue")}</p>
+            <p className="text-sm text-white/70">{t("adminFinance.platformFee")}</p>
             <p className="mt-1 text-2xl font-bold">{formatRupiah(data.summary.platformRevenue)}</p>
             <p className="mt-1 text-xs text-white/60">
-              {formatRupiah(data.summary.settledRevenue)} · {t("adminFinance.heldRevenue")}{" "}
+              {t("adminFinance.settledRevenue")}: {formatRupiah(data.summary.settledRevenue)} · {t("adminFinance.heldRevenue")}:{" "}
               {formatRupiah(data.summary.heldRevenue)}
+            </p>
+            <p className="mt-0.5 text-xs text-white/60">
+              {t("adminFinance.ledgerFeeHint", { amount: formatRupiah(data.summary.ledgerFee) })}
             </p>
           </div>
 
@@ -644,8 +820,20 @@ export default function AdminKeuangan() {
             <p className="mt-1 text-xs text-admin-muted">
               {t("admin.amount")}: {formatRupiah(data.summary.pendingWithdrawalAmount)}
             </p>
+            <p className={`mt-0.5 text-xs ${sellerDeficit > 0 ? "font-semibold text-[#E11D48]" : "text-admin-muted"}`}>
+              {t("adminFinance.sellerDeficit")}: {formatRupiah(sellerDeficit)}
+            </p>
           </div>
         </div>
+
+        {sellerDeficit > 0 ? (
+          <div className="mb-5 rounded-xl border border-[#FECACA] bg-[#FDECEC] px-4 py-3 text-sm text-[#B91C1C]">
+            <p className="font-bold">
+              {t("adminFinance.sellerDeficit")}: {formatRupiah(sellerDeficit)}
+            </p>
+            <p className="mt-0.5">{t("adminFinance.sellerDeficitAlert")}</p>
+          </div>
+        ) : null}
 
         {actionError ? (
           <div className="mb-4 rounded-xl bg-[#FDECEC] px-4 py-2.5 text-sm font-medium text-[#E11D48]">{actionError}</div>
@@ -901,35 +1089,47 @@ export default function AdminKeuangan() {
                     <th className="pb-3 font-semibold">{t("admin.transactionId")}</th>
                     <th className="pb-3 font-semibold">{t("admin.sellerBuyer")}</th>
                     <th className="pb-3 font-semibold">{t("sellerFinance.gross")}</th>
-                    <th className="pb-3 font-semibold">{t("adminFinance.platformRevenue")}</th>
+                    <th className="pb-3 font-semibold">{t("adminFinance.platformFee")}</th>
                     <th className="pb-3 font-semibold">{t("sellerFinance.net")}</th>
-                    <th className="pb-3 font-semibold">{t("admin.status")}</th>
+                    <th className="pb-3 font-semibold">{t("sellerFinance.orderStatus")}</th>
+                    <th className="pb-3 font-semibold">{t("adminFinance.fundStatus")}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.map((tx) => (
-                    <tr key={tx.id} className="border-t border-[#F1F4F8]">
-                      <td className="py-4 pr-3 font-semibold text-admin-ink">
-                        {tx.order_number}
-                        <span className="block text-xs font-normal text-admin-muted">{formatDate(tx.date)}</span>
-                      </td>
-                      <td className="py-4 pr-3">
-                        <p className="font-semibold text-admin-ink">{tx.seller}</p>
-                        <p className="text-xs text-admin-muted">{tx.payment_method || "-"}</p>
-                      </td>
-                      <td className="whitespace-nowrap py-4 pr-3 font-medium text-admin-ink">{formatRupiah(tx.gross)}</td>
-                      <td className="whitespace-nowrap py-4 pr-3 font-semibold text-[#16A34A]">{formatRupiah(tx.fee)}</td>
-                      <td className="whitespace-nowrap py-4 pr-3 font-medium text-admin-ink">{formatRupiah(tx.net)}</td>
-                      <td className="py-4">
-                        <span className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${STATUS_STYLE[tx.status] || "bg-[#EEF1F6] text-admin-muted"}`}>
-                          ● {STATUS_KEY[tx.status] ? t(STATUS_KEY[tx.status]) : tx.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {transactions.map((tx) => {
+                    const statusLabel =
+                      tx.status_label || (STATUS_KEY[tx.status] ? t(STATUS_KEY[tx.status]) : tx.status);
+                    const fundLabel =
+                      tx.fund_status || tx.status_label || (STATUS_KEY[tx.status] ? t(STATUS_KEY[tx.status]) : tx.status);
+                    return (
+                      <tr key={tx.id} className="border-t border-[#F1F4F8]">
+                        <td className="py-4 pr-3 font-semibold text-admin-ink">
+                          {tx.order_number}
+                          <span className="block text-xs font-normal text-admin-muted">{formatDate(tx.date)}</span>
+                        </td>
+                        <td className="py-4 pr-3">
+                          <p className="font-semibold text-admin-ink">{tx.seller}</p>
+                          <p className="text-xs text-admin-muted">{tx.payment_method || "-"}</p>
+                        </td>
+                        <td className="whitespace-nowrap py-4 pr-3 font-medium text-admin-ink">{formatRupiah(tx.gross)}</td>
+                        <td className="whitespace-nowrap py-4 pr-3 font-semibold text-[#16A34A]">{formatRupiah(tx.fee)}</td>
+                        <td className="whitespace-nowrap py-4 pr-3 font-medium text-admin-ink">{formatRupiah(tx.net)}</td>
+                        <td className="py-4">
+                          <span className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${STATUS_STYLE[tx.status] || "bg-[#EEF1F6] text-admin-muted"}`}>
+                            ● {statusLabel}
+                          </span>
+                        </td>
+                        <td className="py-4">
+                          <span className="whitespace-nowrap rounded-full bg-[#EEF1F6] px-3 py-1 text-xs font-semibold text-admin-muted">
+                            {fundLabel}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {!loading && transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-10 text-center text-sm text-admin-muted">
+                      <td colSpan={7} className="py-10 text-center text-sm text-admin-muted">
                         {t("sellerFinance.transactionEmpty")}
                       </td>
                     </tr>
@@ -944,11 +1144,12 @@ export default function AdminKeuangan() {
               <h2 className="mb-4 text-base font-bold text-admin-ink">{t("adminFinance.feeTiers")}</h2>
               <div className="space-y-2.5">
                 {data.feeTiers.map((tier) => (
-                  <div key={tier.rate} className="flex items-center justify-between rounded-xl border border-[#EEF1F6] px-3 py-2.5">
-                    <span className="text-sm text-admin-ink">
-                      {FEE_TIER_KEY[String(tier.rate)] ? t(FEE_TIER_KEY[String(tier.rate)]) : tier.label}
-                    </span>
-                    <span className="rounded-full bg-[#E8F0FE] px-2.5 py-0.5 text-xs font-bold text-[#2563EB]">
+                  <div key={tier.rate} className="flex items-center justify-between gap-3 rounded-xl border border-[#EEF1F6] px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-admin-ink">{tier.label}</p>
+                      <p className="text-xs text-admin-muted">{tier.condition}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-[#E8F0FE] px-2.5 py-0.5 text-xs font-bold text-[#2563EB]">
                       {formatPercent(tier.rate)}
                     </span>
                   </div>
@@ -963,15 +1164,21 @@ export default function AdminKeuangan() {
                   <div key={entry.id} className="rounded-xl border border-[#EEF1F6] p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-admin-ink">{entry.order_number || entry.type}</p>
-                        <p className="text-xs text-admin-muted">{formatDate(entry.created_at)}</p>
+                        <p className="truncate text-sm font-semibold text-admin-ink">
+                          {entry.type || entry.order_number || "-"}
+                        </p>
+                        <p className="text-xs text-admin-muted">
+                          {formatDate(entry.created_at)}
+                          {entry.order_number ? ` · ${entry.order_number}` : ""}
+                        </p>
                       </div>
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${LEDGER_STYLE[entry.status] || "bg-[#EEF1F6] text-admin-muted"}`}>
-                        {entry.status === "held"
-                          ? t("adminFinance.statusHeld")
-                          : entry.status === "settled"
-                            ? t("adminFinance.statusSettled")
-                            : t("adminFinance.statusCancelled")}
+                        {entry.status_label ||
+                          (entry.status === "held"
+                            ? t("adminFinance.statusHeld")
+                            : entry.status === "settled"
+                              ? t("adminFinance.statusSettled")
+                              : t("adminFinance.statusCancelled"))}
                       </span>
                     </div>
                     <p className="mt-2 text-sm font-bold text-[#16A34A]">+{formatRupiah(entry.amount)}</p>

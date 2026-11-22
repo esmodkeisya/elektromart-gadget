@@ -1,7 +1,10 @@
 const jwt = require("jsonwebtoken");
 const { prisma } = require("./prisma");
 
-const SECRET = process.env.JWT_SECRET || "elektromart-local-dev-secret-change-me";
+const SECRET = process.env.JWT_SECRET;
+if (!SECRET) {
+  throw new Error("JWT_SECRET wajib dikonfigurasi sebelum server dijalankan.");
+}
 const EXPIRES_IN = process.env.JWT_EXPIRES_IN || "30d";
 
 function signToken(userId) {

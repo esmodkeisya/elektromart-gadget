@@ -19,7 +19,8 @@ import { useLanguage } from "@/lib/i18n";
 import TopBar from "../components/TopBar";
 import { api, type ProductRecord } from "@/lib/api";
 import { formatRupiah } from "@/lib/data";
-import { buildWorkbook, downloadWorkbook, reportDate } from "@/lib/report";
+import { buildWorkbook, downloadWorkbook, excelDate, reportDate, reportDateTime } from "@/lib/report";
+import type { CellValue, ReportMeta, SummaryLine, SummarySpec, TableSpec } from "@/lib/report";
 
 interface StatCard {
   labelKey: string;
@@ -39,11 +40,15 @@ interface WeekPoint {
 interface SellerStats {
   products: number;
   active: number;
+  inactive?: number;
   lowStock: number;
   outOfStock: number;
   totalRevenue: number;
+  units?: number;
   totalOrders: number;
   activeOrders: number;
+  completedOrders?: number;
+  buyerTotal?: number;
 }
 
 interface LowStockProduct {
@@ -73,11 +78,15 @@ export default function Dashboard() {
   const [apiStats, setApiStats] = useState<SellerStats>({
     products: 0,
     active: 0,
+    inactive: 0,
     lowStock: 0,
     outOfStock: 0,
     totalRevenue: 0,
+    units: 0,
     totalOrders: 0,
     activeOrders: 0,
+    completedOrders: 0,
+    buyerTotal: 0,
   });
   const [weekly, setWeekly] = useState<WeekPoint[]>([]);
   const [recentProducts, setRecentProducts] = useState<ProductRecord[]>([]);
@@ -107,8 +116,8 @@ export default function Dashboard() {
   }, []);
 
   const stats: StatCard[] = [
-    { labelKey: "seller.totalSales", value: formatRupiah(apiStats.totalRevenue), change: `${apiStats.totalOrders} ${t("seller.orders")}`, changeUp: true, icon: CreditCard, iconWrap: "bg-[#E8EEF8] text-[#3B5B8C]" },
-    { labelKey: "seller.activeOrders", value: "0", change: t("admin.fromDatabase"), changeUp: true, icon: Truck, iconWrap: "bg-[#FFF1E6] text-[#D97706]" },
+    { labelKey: "seller.totalSales", value: formatRupiah(apiStats.totalRevenue), change: `${apiStats.totalOrders} ${t("seller.validOrdersOnly")}`, changeUp: true, icon: CreditCard, iconWrap: "bg-[#E8EEF8] text-[#3B5B8C]" },
+    { labelKey: "seller.activeOrdersLabel", value: String(apiStats.activeOrders || 0), change: t("seller.validOrdersOnly"), changeUp: true, icon: Truck, iconWrap: "bg-[#FFF1E6] text-[#D97706]" },
     { labelKey: "seller.myProducts", value: String(apiStats.products), change: `${apiStats.active} ${t("admin.active")}`, changeUp: true, icon: Package, iconWrap: "bg-[#EEF1F6] text-[#64748B]" },
     { labelKey: "seller.outOfStock", value: String(apiStats.outOfStock), change: `${apiStats.lowStock} ${t("seller.lowStockShort")}`, changeUp: false, icon: Percent, iconWrap: "bg-[#E8EEF8] text-[#3B5B8C]" },
   ];
@@ -143,133 +152,217 @@ export default function Dashboard() {
   async function handleDownload() {
     setDownloading(true);
     try {
-      const weeklySheet = t("sellerReport.weeklySales");
-      const weeklyRows = weekly.map((point) => [point.day, point.value, null]);
-      const weeklyTotalRow = 5 + weeklyRows.length;
-      const weeklyEnd = Math.max(weeklyTotalRow - 1, 5);
+      type ExportProduct = {
+        name: string;
+        sku: string | null;
+        category: string | null;
+        price: number;
+        stock: number;
+        status_label: string;
+        dimensions_complete: boolean;
+        created_at: string | null;
+      };
+      type ExportSellerDashboard = {
+        stats: {
+          products: number;
+          active: number;
+          inactive: number;
+          lowStock: number;
+          outOfStock: number;
+          totalRevenue: number;
+          units: number;
+          totalOrders: number;
+          activeOrders: number;
+          completedOrders: number;
+          buyerTotal: number;
+        };
+        weekly: Array<{ date: string; label: string; value: number; orders: number }>;
+        recentProducts: ExportProduct[];
+        popularProducts: Array<{
+          name: string;
+          category: string | null;
+          sold: number;
+          revenue: number;
+          orders: number;
+          buyers: number;
+          stock?: number;
+        }>;
+        lowStockProducts: ExportProduct[];
+        seller_name?: string;
+      };
 
-      const productColumns = [
-        { header: t("sellerReport.product"), width: 38 },
-        { header: t("sellerReport.category"), width: 18 },
-        { header: t("sellerReport.price"), width: 17, format: "currency" as const },
-        { header: t("sellerReport.stock"), width: 10, format: "number" as const },
-        { header: t("sellerReport.status"), width: 14 },
-        { header: t("seller.weightKg"), width: 13, format: "number" as const },
-        { header: t("sellerReport.dimensions"), width: 26 },
+      const payload = await api<ExportSellerDashboard>("/api/dashboard/seller");
+      const s = payload.stats;
+      const today = reportDate();
+      const weeklyTotal = payload.weekly.reduce((sum, row) => sum + Number(row.value || 0), 0);
+      const recentProducts = [...payload.recentProducts].sort((a, b) =>
+        String(b.created_at || "").localeCompare(String(a.created_at || ""))
+      );
+
+      const meta: ReportMeta = {
+        title: "Laporan Bisnis Seller",
+        platform: "ElektroMart",
+        subject: payload.seller_name || "Seller",
+        period: { from: today, to: today },
+        generatedAt: reportDateTime(),
+        notes: [
+          "Terjual = pesanan valid (Dibayar, Dikirim, Selesai).",
+          "Data penjualan 7 hari berdasarkan tanggal pesanan (WIB).",
+        ],
+        currency: "Rupiah (Rp)",
+      };
+
+      const weeklyRows: CellValue[][] = payload.weekly.length
+        ? payload.weekly.map((row) => [
+            excelDate(row.date),
+            row.label,
+            Number(row.value || 0),
+            Number(row.orders || 0),
+            weeklyTotal > 0 ? Number(row.value || 0) / weeklyTotal : 0,
+          ])
+        : [["Tidak ada penjualan pada periode ini."]];
+
+      const popularRows: CellValue[][] = payload.popularProducts.length
+        ? payload.popularProducts.map((row) => [
+            row.name,
+            row.category || "-",
+            Number(row.sold || 0),
+            Number(row.revenue || 0),
+            Number(row.orders || 0),
+            null,
+          ])
+        : [["Tidak ada produk terlaris pada periode ini."]];
+
+      const productRows = (products: ExportProduct[]): CellValue[][] =>
+        products.length
+          ? products.map((row) => [
+              row.name,
+              row.sku || "-",
+              row.category || "-",
+              Number(row.price || 0),
+              Number(row.stock || 0),
+              row.status_label,
+              row.dimensions_complete ? "Lengkap" : "Perlu dilengkapi",
+              excelDate(row.created_at),
+            ])
+          : [["Tidak ada produk pada periode ini."]];
+
+      const productColumns: TableSpec["columns"] = [
+        { header: "Nama Produk", width: 36 },
+        { header: "SKU", width: 18 },
+        { header: "Kategori", width: 18 },
+        { header: "Harga", width: 18, format: "currency" },
+        { header: "Stok", width: 10, format: "number", align: "center" },
+        { header: "Status", width: 14, align: "center" },
+        { header: "Berat/Dimensi", width: 22, align: "center" },
+        { header: "Dibuat", width: 16, format: "date", align: "center" },
+      ];
+      const productTotal = (row: number): CellValue[] => [
+        "TOTAL",
+        null,
+        null,
+        null,
+        `=SUM(E8:E${row - 1})`,
+        null,
+        null,
+        null,
+      ];
+
+      const lines: SummaryLine[] = [
+        { kind: "section", label: "1. Penjualan" },
+        { kind: "detail", label: "Total Penjualan", value: s.totalRevenue, note: "" },
+        { kind: "detail", label: "Unit Terjual", value: { value: s.units, format: "number" }, note: "" },
+        { kind: "spacer" },
+        { kind: "section", label: "2. Pesanan" },
+        { kind: "detail", label: "Pesanan Valid", value: { value: s.totalOrders, format: "number" }, note: "" },
+        { kind: "detail", label: "Pesanan Aktif", value: { value: s.activeOrders, format: "number" }, note: "" },
+        { kind: "detail", label: "Pesanan Selesai", value: { value: s.completedOrders, format: "number" }, note: "" },
+        { kind: "detail", label: "Pembeli Unik", value: { value: s.buyerTotal, format: "number" }, note: "" },
+        { kind: "spacer" },
+        { kind: "section", label: "3. Produk & Stok" },
+        { kind: "detail", label: "Total Produk", value: { value: s.products, format: "number" }, note: "" },
+        { kind: "detail", label: "Produk Aktif", value: { value: s.active, format: "number" }, note: "" },
+        { kind: "detail", label: "Produk Nonaktif", value: { value: s.inactive, format: "number" }, note: "" },
+        { kind: "detail", label: "Stok Habis", value: { value: s.outOfStock, format: "number" }, note: "" },
+        { kind: "detail", label: "Stok Menipis", value: { value: s.lowStock, format: "number" }, note: "" },
+      ];
+
+      const sheets: Array<TableSpec | SummarySpec> = [
         {
-          header: t("sellerReport.stockValue"),
-          width: 18,
-          format: "currency" as const,
-          formula: (r: number) => `C${r}*D${r}`,
+          kind: "summary",
+          name: "Ringkasan",
+          title: "Ringkasan Bisnis Seller",
+          lines,
+          widths: [52, 22, 48],
+        },
+        {
+          kind: "table",
+          name: "Penjualan 7 Hari",
+          title: "Penjualan 7 Hari",
+          subtitle: "7 hari kalender terakhir (WIB)",
+          columns: [
+            { header: "Tanggal", width: 16, format: "date", align: "center" },
+            { header: "Hari", width: 14, align: "center" },
+            { header: "Penjualan", width: 20, format: "currency" },
+            { header: "Pesanan", width: 12, format: "number", align: "center" },
+            { header: "%", width: 12, format: "percent", align: "center" },
+          ],
+          rows: weeklyRows,
+          total: (row) => [
+            "TOTAL",
+            null,
+            `=SUM(C8:C${row - 1})`,
+            `=SUM(D8:D${row - 1})`,
+            `=SUM(E8:E${row - 1})`,
+          ],
+        },
+        {
+          kind: "table",
+          name: "Produk Terlaris",
+          title: "Produk Terlaris",
+          subtitle: "Pesanan valid (Dibayar, Dikirim, Selesai)",
+          columns: [
+            { header: "Produk", width: 36 },
+            { header: "Kategori", width: 18 },
+            { header: "Unit Terjual", width: 14, format: "number", align: "center" },
+            { header: "Pendapatan", width: 20, format: "currency" },
+            { header: "Pesanan", width: 12, format: "number", align: "center" },
+            { header: "Pendapatan/Unit", width: 20, format: "currency", formula: (r) => `IF(C${r}=0,"",D${r}/C${r})` },
+          ],
+          rows: popularRows,
+          total: (row) => [
+            "TOTAL",
+            null,
+            `=SUM(C8:C${row - 1})`,
+            `=SUM(D8:D${row - 1})`,
+            `=SUM(E8:E${row - 1})`,
+            null,
+          ],
+        },
+        {
+          kind: "table",
+          name: "Daftar Produk",
+          title: "Daftar Produk",
+          subtitle: "Semua produk seller",
+          columns: productColumns,
+          rows: productRows(recentProducts),
+          total: productTotal,
+        },
+        {
+          kind: "table",
+          name: "Stok Menipis",
+          title: "Stok Menipis",
+          subtitle: "Produk dengan stok di bawah ambang batas",
+          columns: productColumns,
+          rows: payload.lowStockProducts.length
+            ? productRows(payload.lowStockProducts)
+            : [["Tidak ada produk stok menipis."]],
+          total: productTotal,
         },
       ];
 
-      const workbook = buildWorkbook(
-        {
-          title: `${t("seller.businessSummary")} — ElektroMart`,
-          subtitle: `${t("sellerReport.generatedAt")}: ${todayLabel}`,
-          generatedLabel: t("sellerReport.generatedAt"),
-        },
-        [
-          {
-            name: t("sellerReport.summary"),
-            title: t("sellerReport.summary"),
-            subtitle: `${t("seller.businessSummary")} — ElektroMart`,
-            columns: [
-              { header: t("sellerReport.metric"), width: 34 },
-              { header: t("sellerReport.value"), width: 22 },
-              { header: t("sellerReport.note"), width: 42 },
-            ],
-            rows: [
-              [t("seller.totalSales"), { value: apiStats.totalRevenue, format: "currency" }, ""],
-              [t("sellerReport.totalOrders"), { value: apiStats.totalOrders, format: "number" }, ""],
-              [t("sellerReport.activeOrders"), { value: apiStats.activeOrders, format: "number" }, ""],
-              [t("seller.myProducts"), { value: apiStats.products, format: "number" }, ""],
-              [t("sellerReport.active"), { value: apiStats.active, format: "number" }, ""],
-              [t("sellerReport.outOfStock"), { value: apiStats.outOfStock, format: "number" }, ""],
-              [t("sellerReport.lowStockCount"), { value: apiStats.lowStock, format: "number" }, t("seller.lowStockProductsDesc")],
-              [t("sellerReport.weeklySales"), { value: `='${weeklySheet}'!B${weeklyTotalRow}`, format: "currency" }, t("sellerReport.fromWeekly")],
-            ],
-          },
-          {
-            name: weeklySheet,
-            title: t("sellerReport.weeklySales"),
-            subtitle: `${t("seller.businessSummary")} — ElektroMart`,
-            columns: [
-              { header: t("sellerReport.day"), width: 16 },
-              { header: t("sellerReport.value"), width: 20, format: "currency" },
-              {
-                header: t("sellerReport.share"),
-                width: 14,
-                format: "percent",
-                formula: (r) => `IF($B${weeklyTotalRow}=0,0,B${r}/$B${weeklyTotalRow})`,
-              },
-            ],
-            rows: weeklyRows,
-            total: (r) => [
-              { value: t("sellerReport.total"), format: "text" },
-              `=SUM(B5:B${Math.max(r - 1, 5)})`,
-              `=SUM(C5:C${Math.max(r - 1, 5)})`,
-            ],
-          },
-          {
-            name: t("sellerReport.popularProducts"),
-            title: t("sellerReport.popularProducts"),
-            subtitle: t("seller.popularProductsSubtitle"),
-            columns: [
-              { header: t("sellerReport.product"), width: 38 },
-              { header: t("sellerReport.category"), width: 18 },
-              { header: t("sellerReport.sold"), width: 10, format: "number" },
-              { header: t("sellerReport.revenue"), width: 18, format: "currency" },
-              { header: t("sellerReport.orders"), width: 10, format: "number" },
-              { header: t("sellerReport.buyers"), width: 10, format: "number" },
-              { header: t("sellerReport.perUnit"), width: 18, format: "currency", formula: (r) => `IF(C${r}=0,0,D${r}/C${r})` },
-            ],
-            rows: popularProducts.map((p) => [
-              p.name, p.category || "-", p.sold, p.revenue, p.orders, p.buyers, null,
-            ]),
-            total: (r) => [
-              { value: t("sellerReport.total"), format: "text" }, "",
-              `=SUM(C5:C${Math.max(r - 1, 5)})`,
-              `=SUM(D5:D${Math.max(r - 1, 5)})`,
-              `=SUM(E5:E${Math.max(r - 1, 5)})`,
-              `=SUM(F5:F${Math.max(r - 1, 5)})`, "",
-            ],
-          },
-          {
-            name: t("sellerReport.recentProducts"),
-            title: t("sellerReport.recentProducts"),
-            subtitle: `${t("seller.businessSummary")} — ElektroMart`,
-            columns: productColumns,
-            rows: recentProducts.map((p) => [
-              p.name, p.category || "-", p.price, p.stock, p.status,
-              p.weight_kg ?? 0, dimensionsOf(p), null,
-            ]),
-            total: (r) => [
-              { value: t("sellerReport.total"), format: "text" }, "", "",
-              `=SUM(D5:D${Math.max(r - 1, 5)})`, "", "", "",
-              `=SUM(H5:H${Math.max(r - 1, 5)})`,
-            ],
-          },
-          {
-            name: t("sellerReport.lowStock"),
-            title: t("sellerReport.lowStock"),
-            subtitle: t("seller.lowStockProductsDesc"),
-            columns: productColumns,
-            rows: lowStockProducts.map((p) => [
-              p.name, p.category || "-", p.price, p.stock, p.status, "-", "-", null,
-            ]),
-            highlightBelow: { column: 4, value: 10 },
-            total: (r) => [
-              { value: t("sellerReport.total"), format: "text" }, "", "",
-              `=SUM(D5:D${Math.max(r - 1, 5)})`, "", "", "",
-              `=SUM(H5:H${Math.max(r - 1, 5)})`,
-            ],
-          },
-        ]
-      );
-
-      await downloadWorkbook(`laporan-bisnis-seller-${reportDate()}.xlsx`, workbook);
+      const workbook = buildWorkbook(meta, sheets);
+      await downloadWorkbook(`laporan-bisnis-seller-${today}.xlsx`, workbook);
     } finally {
       setDownloading(false);
     }
@@ -345,7 +438,9 @@ export default function Dashboard() {
                 {t("seller.viewProducts")} &rarr;
               </button>
             </div>
-            <p className="mb-4 text-xs text-seller-muted">{t("seller.lowStockProductsDesc")}</p>
+            <p className="mb-4 text-xs text-seller-muted">
+              {t("seller.lowStockDesc", { count: apiStats.lowStock || lowStockProducts.length })}
+            </p>
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {lowStockProducts.map((product) => (
                 <button
@@ -377,7 +472,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
           <div className="rounded-2xl bg-white p-6 shadow-card xl:col-span-2">
             <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-seller-ink">{t("seller.weeklySalesTrend")}</h2>
+              <h2 className="text-lg font-bold text-seller-ink">{t("seller.weeklyValidSalesTrend")}</h2>
               <button type="button" className="text-sm font-semibold text-seller-navy">
                 {t("seller.viewDetails")}
               </button>

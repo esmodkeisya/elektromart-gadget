@@ -25,7 +25,8 @@ import {
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
 import { api } from "@/lib/api";
-import { buildWorkbook, downloadWorkbook, reportDate } from "@/lib/report";
+import { buildWorkbook, downloadWorkbook, excelDate, reportDate, reportDateTime } from "@/lib/report";
+import type { CellValue, ReportMeta, SummaryLine, SummarySpec, TableSpec } from "@/lib/report";
 import { formatRupiah } from "@/lib/data";
 
 type CategorySlice = { label: string; value: number; stock: number; color: string };
@@ -38,6 +39,8 @@ type OrderStats = {
   commissionRevenue: number;
   escrowHeldFunds: number;
   totalPayoutToSellers: number;
+  availablePlatformBalance: number;
+  sellerDeficit: number;
   revenueOrders: number;
 };
 type PaymentMethodStat = { name: string; count: number };
@@ -94,7 +97,7 @@ function PieChart({ segments }: { segments: CategorySlice[] }) {
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
         <span className="text-2xl font-bold text-[#0a1633]">{segments.length}</span>
         <span className="text-[10px] font-medium text-slate-400">{t("admin.registeredCategories")}</span>
-        <span className="mt-0.5 text-[10px] text-slate-400">{displayTotal} {t("products")}</span>
+        <span className="mt-0.5 text-[10px] text-slate-400">{displayTotal} {t("admin.unitsSoldShort")}</span>
       </div>
     </div>
   );
@@ -106,7 +109,7 @@ function fromDeg(deg: number) {
 
 export default function DashboardPage() {
   const { t } = useLanguage();
-  const [stats, setStats] = useState({ sellers: 0, buyers: 0, products: 0, categories: 0 });
+  const [stats, setStats] = useState({ sellers: 0, activeSellers: 0, buyers: 0, products: 0, categories: 0 });
   const [categorySales, setCategorySales] = useState<CategorySlice[]>([]);
   const [popularProducts, setPopularProducts] = useState<PopularProduct[]>([]);
   const [topSellers, setTopSellers] = useState<TopSeller[]>([]);
@@ -117,6 +120,8 @@ export default function DashboardPage() {
     commissionRevenue: 0,
     escrowHeldFunds: 0,
     totalPayoutToSellers: 0,
+    availablePlatformBalance: 0,
+    sellerDeficit: 0,
     revenueOrders: 0,
   });
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodStat[]>([]);
@@ -134,8 +139,17 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void api<{
-      stats: { sellers: number; buyers: number; products: number; categories: number };
-      categories: { name: string; color: string; product_count: number; stock_total?: number }[];
+      stats: { sellers: number; activeSellers: number; buyers: number; products: number; categories: number };
+      categories: {
+        name: string;
+        color: string;
+        product_count?: number;
+        stock_total?: number;
+        units_sold?: number;
+        revenue?: number;
+        orders?: number;
+        share?: number;
+      }[];
       products: PopularProduct[];
       sellers: TopSeller[];
       orders?: OrderStats;
@@ -146,14 +160,10 @@ export default function DashboardPage() {
         setStats(data.stats);
         const categorySales = (data.categories || []).map((category) => ({
           label: category.name,
-          value: category.product_count || 0,
+          value: category.units_sold || 0,
           stock: category.stock_total || 0,
           color: category.color || "#94a3b8",
         }));
-        const categoryTotal = categorySales.reduce((sum, category) => sum + category.value, 0);
-        const unassignedProducts = Math.max(0, data.stats.products - categoryTotal);
-        const accessories = categorySales.find((category) => category.label.toLowerCase() === "aksesoris");
-        if (accessories && unassignedProducts > 0) accessories.value += unassignedProducts;
         setCategorySales(categorySales);
         setPopularProducts(data.products || []);
         setTopSellers(data.sellers || []);
@@ -187,176 +197,320 @@ export default function DashboardPage() {
   async function handleDownload() {
     setDownloading(true);
     try {
-      const categorySheet = t("adminReport.category");
-      const paymentSheet = t("admin.popularPaymentMethods");
-      const categoryTotal = 5 + categorySales.length;
-      const paymentTotal = 5 + paymentMethods.length;
-      const sum = (sheet: string, col: string, totalRow: number) =>
-        `='${sheet}'!${col}${totalRow}`;
-      const categoryCell = categorySales.length ? sum(categorySheet, "B", categoryTotal) : 0;
-      const paymentCell = paymentMethods.length ? sum(paymentSheet, "B", paymentTotal) : 0;
+      type ExportAdminDashboard = {
+        stats: {
+          sellers: number;
+          activeSellers: number;
+          buyers: number;
+          products: number;
+          categories: number;
+        };
+        categories: Array<{
+          name: string;
+          product_count: number;
+          stock_total: number;
+          units_sold: number;
+          revenue: number;
+          orders: number;
+          share: number;
+        }>;
+        products: Array<{
+          name: string;
+          category: string | null;
+          units_sold: number;
+          revenue: number;
+          orders: number;
+          stock: number;
+        }>;
+        sellers: Array<{
+          name: string;
+          gross: number;
+          fee: number;
+          net: number;
+          units: number;
+          orders: number;
+          products: number;
+          active_products: number;
+        }>;
+        orders: {
+          total: number;
+          thisMonth: number;
+          valid: number;
+          active: number;
+          completed: number;
+          cancelled: number;
+          waiting: number;
+          units: number;
+          gmv: number;
+          gross: number;
+          platformRevenue: number;
+          escrowHeldFunds: number;
+          totalPayoutToSellers: number;
+        };
+        paymentMethods: Array<{ name: string; count: number }>;
+        flashSale: {
+          soldUnits: number;
+          quota: number;
+          remaining: number;
+          activeProducts: number;
+          products: Array<{
+            name: string;
+            sold_today?: number;
+            flash_sale_quota?: number;
+            flash_sale_sold?: number;
+            flash_sale_remaining?: number;
+            stock?: number;
+          }>;
+        };
+        reviews: Array<{
+          product_name: string;
+          order_id: string | null;
+          rating: number;
+          comment: string | null;
+          date: string | null;
+          created_at?: string;
+        }>;
+      };
 
-      const workbook = buildWorkbook(
+      const payload = await api<ExportAdminDashboard>("/api/dashboard/admin");
+      const s = payload.stats;
+      const o = payload.orders;
+      const today = reportDate();
+      const paymentTotal = payload.paymentMethods.reduce((sum, row) => sum + Number(row.count || 0), 0);
+
+      const meta: ReportMeta = {
+        title: "Laporan Teknis Admin",
+        platform: "ElektroMart",
+        subject: "Seluruh Platform",
+        period: { from: today, to: today },
+        generatedAt: reportDateTime(),
+        notes: [
+          "Unit terjual = pesanan valid; Flash Sale memakai penjualan hari ini (WIB).",
+          "Rincian keuangan tersedia di A-KEU.",
+        ],
+        currency: "Rupiah (Rp)",
+      };
+
+      const categoryRows: CellValue[][] = payload.categories.length
+        ? payload.categories.map((row) => [
+            row.name,
+            Number(row.product_count || 0),
+            Number(row.stock_total || 0),
+            Number(row.units_sold || 0),
+            Number(row.revenue || 0),
+            Number(row.share || 0),
+          ])
+        : [["Tidak ada kategori pada periode ini."]];
+
+      const paymentRows: CellValue[][] = payload.paymentMethods.length
+        ? payload.paymentMethods.map((row) => [
+            row.name,
+            Number(row.count || 0),
+            paymentTotal > 0 ? Number(row.count || 0) / paymentTotal : 0,
+          ])
+        : [["Tidak ada metode pembayaran pada periode ini."]];
+
+      const productRows: CellValue[][] = payload.products.length
+        ? payload.products.map((row) => [
+            row.name,
+            row.category || "-",
+            Number(row.units_sold || 0),
+            Number(row.revenue || 0),
+            Number(row.orders || 0),
+            null,
+            Number(row.stock || 0),
+          ])
+        : [["Tidak ada produk terlaris pada periode ini."]];
+
+      const sellerRows: CellValue[][] = payload.sellers.length
+        ? payload.sellers.map((row) => [
+            row.name,
+            Number(row.gross || 0),
+            Number(row.fee || 0),
+            Number(row.net || 0),
+            Number(row.orders || 0),
+            Number(row.units || 0),
+            Number(row.active_products || 0),
+          ])
+        : [["Tidak ada penjual pada periode ini."]];
+
+      const reviewRows: CellValue[][] = payload.reviews.length
+        ? payload.reviews.map((row) => [
+            excelDate(row.date || row.created_at),
+            row.product_name,
+            row.order_id || "-",
+            Number(row.rating || 0),
+            row.comment || "",
+          ])
+        : [["Tidak ada laporan pada periode ini."]];
+
+      const flashSaleRows: CellValue[][] = payload.flashSale.products.length
+        ? payload.flashSale.products.map((product) => {
+            const quota = Number(product.flash_sale_quota || 0);
+            const sold = Number(
+              product.sold_today ?? product.flash_sale_sold ?? Math.max(0, quota - Number(product.flash_sale_remaining || 0))
+            );
+            const remaining = Number(product.flash_sale_remaining ?? Math.max(0, quota - sold));
+            return [product.name, quota, sold, remaining];
+          })
+        : [["Tidak ada produk flash sale hari ini."]];
+
+      const lines: SummaryLine[] = [
+        { kind: "section", label: "1. Pengguna & Katalog" },
+        { kind: "detail", label: "Seller", value: { value: s.sellers, format: "number" }, note: "" },
+        { kind: "detail", label: "Seller Aktif", value: { value: s.activeSellers, format: "number" }, note: "" },
+        { kind: "detail", label: "Pembeli", value: { value: s.buyers, format: "number" }, note: "" },
+        { kind: "detail", label: "Produk", value: { value: s.products, format: "number" }, note: "" },
+        { kind: "detail", label: "Kategori", value: { value: s.categories, format: "number" }, note: "" },
+        { kind: "spacer" },
+        { kind: "section", label: "2. Transaksi" },
+        { kind: "detail", label: "Total Pesanan", value: { value: o.total, format: "number" }, note: "" },
+        { kind: "detail", label: "Pesanan Valid", value: { value: o.valid, format: "number" }, note: "" },
+        { kind: "detail", label: "Dibatalkan", value: { value: o.cancelled, format: "number" }, note: "" },
+        { kind: "detail", label: "Pesanan Aktif", value: { value: o.active, format: "number" }, note: "" },
+        { kind: "detail", label: "Unit Terjual", value: { value: o.units, format: "number" }, note: "" },
+        { kind: "spacer" },
+        { kind: "section", label: "3. Keuangan Ringkas (rujuk A-KEU)" },
+        { kind: "detail", label: "GMV", value: o.gmv, note: "" },
+        { kind: "detail", label: "Pendapatan Platform", value: o.platformRevenue, note: "" },
+        { kind: "detail", label: "Escrow", value: o.escrowHeldFunds, note: "Rincian di A-KEU" },
+      ];
+
+      const sheets: Array<TableSpec | SummarySpec> = [
         {
-          title: `${t("adminReport.technicalTitle")} — ElektroMart`,
-          subtitle: `${t("adminReport.generatedAt")}: ${new Date().toLocaleString("id-ID", {
-            day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-          })}`,
-          generatedLabel: t("adminReport.generatedAt"),
+          kind: "summary",
+          name: "Ringkasan",
+          title: "Ringkasan Teknis Admin",
+          lines,
+          widths: [52, 22, 48],
         },
-        [
-          {
-            name: t("adminReport.summary"),
-            title: t("adminReport.technicalTitle"),
-            subtitle: "ElektroMart",
-            columns: [
-              { header: t("adminReport.metric"), width: 36 },
-              { header: t("adminReport.value"), width: 22 },
-              { header: t("adminReport.note"), width: 42 },
-            ],
-            rows: [
-              [t("admin.activeSellers"), { value: stats.sellers, format: "number" }, ""],
-              [t("admin.registeredBuyers"), { value: stats.buyers, format: "number" }, ""],
-              [t("admin.registeredProducts"), { value: stats.products, format: "number" }, ""],
-              [t("admin.registeredCategories"), { value: stats.categories, format: "number" }, ""],
-              [t("admin.totalRevenue"), { value: orders.totalRevenue, format: "currency" }, ""],
-              [t("admin.commissionRevenue"), { value: orders.commissionRevenue, format: "currency" }, ""],
-              [t("admin.escrowHeldFunds"), { value: orders.escrowHeldFunds, format: "currency" }, ""],
-              [t("admin.totalPayoutToSellers"), { value: orders.totalPayoutToSellers, format: "currency" }, ""],
-              [t("adminReport.totalOrder"), { value: orders.total, format: "number" }, ""],
-              [t("admin.totalTransactionsThisMonth"), { value: orders.thisMonth, format: "number" }, ""],
-              [t("adminFinance.revenueOrders"), { value: orders.revenueOrders, format: "number" }, ""],
-              [t("adminReport.reports"), { value: reports.length, format: "number" }, reports.length ? "" : t("report.empty")],
-              [t("admin.flashSaleToday"), { value: flashSale.soldUnits, format: "number" }, `${flashSale.soldUnits}/${flashSale.quota} ${t("soldCount")}`],
-              [t("admin.activeFlashSale"), { value: flashSale.activeProducts, format: "number" }, `${flashSale.soldUnits} ${t("adminReport.soldUnits")} ${t("adminReport.quota")}`],
-              [t("adminReport.productCount"), { value: categoryCell, format: "number" }, t("adminReport.fromCategories")],
-              [t("adminReport.payments"), { value: paymentCell, format: "number" }, t("adminReport.fromPayments")],
-            ],
-          },
-          {
-            name: categorySheet,
-            title: t("admin.distributionPerCategory"),
-            subtitle: t("admin.unitsSoldThisYear"),
-            columns: [
-              { header: t("adminReport.category"), width: 30 },
-              { header: t("adminReport.productCount"), width: 18, format: "number" },
-              { header: t("adminReport.stockTotal"), width: 18, format: "number" },
-              {
-                header: t("adminReport.share"),
-                width: 14,
-                format: "percent",
-                formula: (r) => `IF($B${categoryTotal}=0,0,B${r}/$B${categoryTotal})`,
-              },
-            ],
-            rows: categorySales.map((category) => [category.label, category.value, category.stock, null]),
-            total: (r) => [
-              { value: t("adminReport.total"), format: "text" },
-              `=SUM(B5:B${Math.max(r - 1, 5)})`,
-              `=SUM(C5:C${Math.max(r - 1, 5)})`,
-              `=SUM(D5:D${Math.max(r - 1, 5)})`,
-            ],
-          },
-          {
-            name: paymentSheet,
-            title: t("admin.popularPaymentMethods"),
-            subtitle: t("adminReport.technicalTitle"),
-            columns: [
-              { header: t("adminReport.method"), width: 30 },
-              { header: t("adminReport.payments"), width: 18, format: "number" },
-              {
-                header: t("adminReport.share"),
-                width: 14,
-                format: "percent",
-                formula: (r) => `IF($B${paymentTotal}=0,0,B${r}/$B${paymentTotal})`,
-              },
-            ],
-            rows: paymentMethods.map((method) => [method.name, method.count, null]),
-            total: (r) => [
-              { value: t("adminReport.total"), format: "text" },
-              `=SUM(B5:B${Math.max(r - 1, 5)})`,
-              `=SUM(C5:C${Math.max(r - 1, 5)})`,
-            ],
-          },
-          {
-            name: t("admin.flashSaleToday"),
-            title: t("admin.flashSaleToday"),
-            subtitle: `${flashSale.soldUnits}/${flashSale.quota} ${t("soldCount")}`,
-            columns: [
-              { header: t("adminReport.no"), width: 6, format: "number" },
-              { header: t("adminReport.product"), width: 40 },
-              { header: t("adminReport.quota"), width: 14, format: "number" },
-              { header: t("adminReport.soldUnits"), width: 14, format: "number" },
-              { header: t("adminReport.remaining"), width: 14, format: "number" },
-              { header: t("adminReport.stock"), width: 14, format: "number" },
-            ],
-            rows: flashSale.products.map((product, index) => [
-              index + 1,
-              product.name,
-              product.flash_sale_quota,
-              product.flash_sale_sold,
-              product.flash_sale_remaining,
-              product.stock ?? 0,
-            ]),
-            total: (r) => [
-              { value: t("adminReport.total"), format: "text" }, "",
-              `=SUM(C5:C${Math.max(r - 1, 5)})`,
-              `=SUM(D5:D${Math.max(r - 1, 5)})`,
-              `=SUM(E5:E${Math.max(r - 1, 5)})`,
-              `=SUM(F5:F${Math.max(r - 1, 5)})`,
-            ],
-          },
-          {
-            name: t("bestSellers"),
-            title: t("bestSellers"),
-            subtitle: t("admin.topSoldSubtitle"),
-            columns: [
-              { header: t("adminReport.no"), width: 6, format: "number" },
-              { header: t("adminReport.product"), width: 40 },
-              { header: t("adminReport.stock"), width: 12, format: "number" },
-              { header: t("adminReport.category"), width: 22 },
-            ],
-            rows: popularProducts.map((product, index) => [
-              index + 1, product.name, product.stock, product.category || t("categoryFallback"),
-            ]),
-          },
-          {
-            name: t("adminReport.topSellers"),
-            title: t("adminReport.topSellers"),
-            subtitle: t("admin.highestRevenueThisMonth"),
-            columns: [
-              { header: t("adminReport.no"), width: 6, format: "number" },
-              { header: t("adminReport.seller"), width: 38 },
-              { header: t("adminReport.productsOwned"), width: 16, format: "number" },
-            ],
-            rows: topSellers.map((seller, index) => [index + 1, seller.name, seller.products]),
-          },
-          {
-            name: t("report.adminTitle"),
-            title: t("report.adminTitle"),
-            subtitle: t("report.adminSubtitle"),
-            columns: [
-              { header: t("adminReport.date"), width: 20 },
-              { header: t("adminReport.reportedProduct"), width: 34 },
-              { header: t("adminReport.reason"), width: 22 },
-              { header: t("adminReport.reporter"), width: 24 },
-              { header: t("adminReport.status"), width: 18 },
-              { header: t("adminReport.description"), width: 46 },
-            ],
-            rows: reports.map((report) => [
-              new Date(report.created_at).toLocaleDateString("id-ID", {
-                day: "2-digit", month: "short", year: "numeric",
-              }),
-              report.product_name,
-              report.reason,
-              report.reporter || "-",
-              t(report.status === "pending" ? "report.statusPending" : report.status === "resolved" ? "report.statusResolved" : "report.statusDismissed"),
-              report.description || "",
-            ]),
-          },
-        ]
-      );
+        {
+          kind: "table",
+          name: "Kategori",
+          title: "Distribusi Kategori",
+          subtitle: "Agregat katalog dan penjualan pesanan valid.",
+          columns: [
+            { header: "Kategori", width: 28 },
+            { header: "Jumlah Produk", width: 16, format: "number", align: "center" },
+            { header: "Total Stok", width: 16, format: "number", align: "center" },
+            { header: "Unit Terjual", width: 16, format: "number", align: "center" },
+            { header: "Pendapatan", width: 20, format: "currency" },
+            { header: "% Penjualan", width: 14, format: "percent", align: "center" },
+          ],
+          rows: categoryRows,
+          total: (row) => [
+            "TOTAL",
+            `=SUM(B8:B${row - 1})`,
+            `=SUM(C8:C${row - 1})`,
+            `=SUM(D8:D${row - 1})`,
+            `=SUM(E8:E${row - 1})`,
+            { value: 1, format: "percent" },
+          ],
+        },
+        {
+          kind: "table",
+          name: "Metode Pembayaran",
+          title: "Metode Pembayaran",
+          subtitle: "Pesanan valid",
+          columns: [
+            { header: "Metode", width: 30 },
+            { header: "Jumlah Pesanan", width: 18, format: "number", align: "center" },
+            { header: "Persentase", width: 14, format: "percent", align: "center" },
+          ],
+          rows: paymentRows,
+          total: (row) => [
+            "TOTAL",
+            `=SUM(B8:B${row - 1})`,
+            { value: 1, format: "percent" },
+          ],
+        },
+        {
+          kind: "table",
+          name: "Produk Terlaris",
+          title: "Produk Terlaris",
+          subtitle: "Diurutkan berdasarkan unit terjual (pesanan valid)",
+          columns: [
+            { header: "Produk", width: 36 },
+            { header: "Kategori", width: 18 },
+            { header: "Unit Terjual", width: 14, format: "number", align: "center" },
+            { header: "Pendapatan", width: 20, format: "currency" },
+            { header: "Pesanan", width: 12, format: "number", align: "center" },
+            { header: "Pendapatan/Unit", width: 20, format: "currency", formula: (r) => `IF(C${r}=0,"",D${r}/C${r})` },
+            { header: "Stok", width: 12, format: "number", align: "center" },
+          ],
+          rows: productRows,
+          total: (row) => [
+            "TOTAL",
+            null,
+            `=SUM(C8:C${row - 1})`,
+            `=SUM(D8:D${row - 1})`,
+            `=SUM(E8:E${row - 1})`,
+            null,
+            `=SUM(G8:G${row - 1})`,
+          ],
+        },
+        {
+          kind: "table",
+          name: "Penjual Teratas",
+          title: "Penjual Teratas",
+          subtitle: "Diurutkan berdasarkan penjualan kotor",
+          columns: [
+            { header: "Penjual", width: 30 },
+            { header: "Penjualan Kotor", width: 20, format: "currency" },
+            { header: "Fee Platform", width: 20, format: "currency" },
+            { header: "Pendapatan Bersih", width: 20, format: "currency" },
+            { header: "Pesanan", width: 14, format: "number", align: "center" },
+            { header: "Unit Terjual", width: 14, format: "number", align: "center" },
+            { header: "Produk Aktif", width: 14, format: "number", align: "center" },
+          ],
+          rows: sellerRows,
+          total: (row) => [
+            "TOTAL",
+            `=SUM(B8:B${row - 1})`,
+            `=SUM(C8:C${row - 1})`,
+            `=SUM(D8:D${row - 1})`,
+            `=SUM(E8:E${row - 1})`,
+            `=SUM(F8:F${row - 1})`,
+            `=SUM(G8:G${row - 1})`,
+          ],
+        },
+        {
+          kind: "table",
+          name: "Laporan Produk",
+          title: "Laporan Produk",
+          subtitle: "Laporan dari pembeli",
+          columns: [
+            { header: "Tanggal", width: 16, format: "date", align: "center" },
+            { header: "Produk", width: 34 },
+            { header: "No. Pesanan", width: 24 },
+            { header: "Rating", width: 10, format: "number", align: "center" },
+            { header: "Komentar", width: 48 },
+          ],
+          rows: reviewRows,
+        },
+        {
+          kind: "table",
+          name: "Flash Sale Hari Ini",
+          title: "Flash Sale Hari Ini",
+          subtitle: `Terjual ${payload.flashSale.soldUnits}/${payload.flashSale.quota} unit`,
+          columns: [
+            { header: "Produk", width: 36 },
+            { header: "Kuota", width: 14, format: "number", align: "center" },
+            { header: "Terjual Hari Ini", width: 18, format: "number", align: "center" },
+            { header: "Sisa", width: 14, format: "number", align: "center" },
+          ],
+          rows: flashSaleRows,
+          total: (row) => [
+            "TOTAL",
+            `=SUM(B8:B${row - 1})`,
+            `=SUM(C8:C${row - 1})`,
+            `=SUM(D8:D${row - 1})`,
+          ],
+        },
+      ];
 
-      await downloadWorkbook(`laporan-teknis-admin-${reportDate()}.xlsx`, workbook);
+      const workbook = buildWorkbook(meta, sheets);
+      await downloadWorkbook(`laporan-teknis-admin-${today}.xlsx`, workbook);
     } finally {
       setDownloading(false);
     }
@@ -469,8 +623,8 @@ export default function DashboardPage() {
               iconBg="bg-orange-50"
               iconColor="text-orange-500"
               label={t("admin.activeSellers")}
-              value={String(stats.sellers)}
-              change={t("admin.fromDatabase")}
+              value={String(stats.activeSellers || 0)}
+              change={t("admin.activeSellersOfTotal", { count: stats.sellers })}
               up
             />
             <StatCard
@@ -551,7 +705,10 @@ export default function DashboardPage() {
                             }}
                           />
                         </div>
-                        <span className="mt-0.5 block text-right text-[10px] text-slate-400">{pct}%</span>
+                        <span className="mt-0.5 flex items-center justify-between text-[10px] text-slate-400">
+                          <span>{seg.stock.toLocaleString("id-ID")} {t("admin.unitLeft")}</span>
+                          <span>{pct}%</span>
+                        </span>
                       </div>
                     );
                   })}
@@ -569,7 +726,8 @@ export default function DashboardPage() {
                   <FinanceRow label={t("admin.commissionRevenue")} value={formatRupiah(orders.commissionRevenue)} />
                   <FinanceRow label={t("admin.escrowHeldFunds")} value={formatRupiah(orders.escrowHeldFunds)} />
                   <FinanceRow label={t("admin.totalPayoutToSellers")} value={formatRupiah(orders.totalPayoutToSellers)} />
-                  <FinanceRow label={t("admin.platformBalance")} value={formatRupiah(orders.commissionRevenue)} />
+                  <FinanceRow label={t("admin.platformBalance")} value={formatRupiah(orders.availablePlatformBalance || 0)} />
+                  <FinanceRow label={t("admin.sellerDeficit")} value={formatRupiah(orders.sellerDeficit || 0)} />
                 </div>
               </div>
 
@@ -688,7 +846,9 @@ export default function DashboardPage() {
                     {flashSale.soldUnits}/{flashSale.quota} {t("soldCount")}
                     {flashSale.activeProducts ? ` · ${flashSale.activeProducts} ${t("products")}` : ""}
                   </span>
-                  <span className="font-bold text-amber-600">{orders.thisMonth} {t("admin.thisMonthTx")}</span>
+                  <span className="font-bold text-amber-600">
+                    {flashSale.remaining} {t("admin.flashSaleRemaining")}
+                  </span>
                 </div>
               </div>
             </div>

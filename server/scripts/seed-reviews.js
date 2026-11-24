@@ -1,135 +1,196 @@
 /*
- * Memasukkan seluruh ulasan contoh yang ada di frontend (lib/data.ts) ke database.
- * Jalankan dari folder server:  npm run seed:reviews
- * Aman dijalankan berulang kali (tidak membuat duplikat).
+ * Ulasan contoh anonim tidak dipakai lagi. Script ini hanya membuat ulasan
+ * Asep Mulyadi untuk produk yang benar-benar ia beli (pesanan completed) di
+ * Jaya store, maksimal satu ulasan per produk, dan hanya untuk produk yang
+ * masih aktif serta memiliki penjualan valid yang tampil di profil toko.
+ *
+ * Jalankan dari folder server: npm run seed:reviews
+ * Aman dijalankan berulang kali (idempoten).
  */
 
-const path = require("path");
-const { PrismaClient } = require("@prisma/client");
+const { prisma } = require("../src/prisma");
+const finance = require("../src/finance");
 
-require("dotenv").config({ path: path.resolve(__dirname, "../../.env") });
-require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
+const ASEP_EMAIL = "secretbaik010@gmail.com";
+const STORE_NAME = "Jaya store";
 
-const prisma = new PrismaClient();
+const REVIEW_CONTENT = {
+  "samsung galaxy s24 ultra 12/512gb": {
+    rating: 5,
+    comment: "Barang original, kamera jernih banget. Pengiriman cepat!",
+  },
+  "xiaomi 14t pro 12/512gb hyperos": {
+    rating: 5,
+    comment: "Charging 120W gila cepat. Kamera Leica ok banget.",
+  },
+  "jbl charge 5 portable speaker": {
+    rating: 5,
+    comment: "Bass-nya tebel, tahan air beneran. Dipakai sehari-hari aman.",
+  },
+  "playstation 5 slim 1tb + 2 controller": {
+    rating: 5,
+    comment: "Paket lengkap, 2 stik langsung main. Mantap!",
+  },
+  "sony wh-1000xm5 wireless noise": {
+    rating: 5,
+    comment: "ANC-nya the best! Nyaman dipakai seharian.",
+  },
+  "iphone 15 pro max 256gb natural titanium": {
+    rating: 5,
+    comment: "iPhone original, seal masih utuh. Seller responsif.",
+  },
+  "nubia redmagic 11 pro": {
+    rating: 5,
+    comment: "HP gaming kencang dan pengiriman aman. Sesuai deskripsi.",
+  },
+};
 
-const LEGACY_REVIEWS = [
-  {
-    productName: "Samsung Galaxy S24 Ultra 12/512GB",
-    reviews: [
-      { name: "Andi P.", rating: 5, comment: "Barang original, kamera jernih banget. Pengiriman cepat!" },
-      { name: "Siti N.", rating: 5, comment: "S Pen sangat membantu untuk catatan harian. Recommended." },
-      { name: "Budi S.", rating: 4, comment: "Produk bagus, packing aman. Sedikit lama pengiriman ke luar Jawa." },
-    ],
-  },
-  {
-    productName: "iPhone 15 Pro Max 256GB Natural Titanium",
-    reviews: [
-      { name: "Rina K.", rating: 5, comment: "iPhone original, seal masih utuh. Seller responsif." },
-      { name: "Dimas W.", rating: 5, comment: "Kamera night mode-nya luar biasa. Worth it!" },
-    ],
-  },
-  {
-    productName: "MacBook Air M3 13 Inch 256GB",
-    reviews: [
-      { name: "Felix H.", rating: 5, comment: "Ringan, baterai tahan lama. Perfect untuk kuliah." },
-      { name: "Maya L.", rating: 5, comment: "Performa M3 kencang untuk editing video 1080p." },
-    ],
-  },
-  {
-    productName: "Sony WH-1000XM5 Wireless Noise",
-    reviews: [
-      { name: "Kevin T.", rating: 5, comment: "ANC-nya the best! Nyaman dipakai seharian." },
-      { name: "Lia S.", rating: 4, comment: "Suara bass enak, tapi case agak besar." },
-    ],
-  },
-  {
-    productName: "PlayStation 5 Slim 1TB + 2 Controller",
-    reviews: [
-      { name: "Arif G.", rating: 5, comment: "Paket lengkap, 2 stik langsung main. Mantap!" },
-      { name: "Nadia R.", rating: 5, comment: "Loading game cepat banget. Worth every rupiah." },
-    ],
-  },
-  {
-    productName: "Xiaomi 14T Pro 12/512GB HyperOS",
-    reviews: [
-      { name: "Hendra M.", rating: 5, comment: "Charging 120W gila cepat. Kamera Leica ok banget." },
-      { name: "Putri A.", rating: 4, comment: "HP kencang, harga masuk akal untuk spek segini." },
-    ],
-  },
-  {
-    productName: "JBL Charge 5 Portable Speaker",
-    reviews: [
-      { name: "Omar D.", rating: 5, comment: "Bass-nya tebel, tahan air beneran. Dipakai di pantai aman." },
-      { name: "Citra B.", rating: 4, comment: "Suara jernih, baterai awet. Cocok buat camping." },
-    ],
-  },
-];
+const FALLBACK_REVIEW = {
+  rating: 5,
+  comment: "Barang sesuai pesanan, kualitas bagus dan pengiriman aman.",
+};
 
-function findProduct(products, productName) {
-  const target = productName.trim().toLowerCase();
-  return (
-    products.find((product) => product.name.trim().toLowerCase() === target) ||
-    products.find((product) => {
-      const name = product.name.trim().toLowerCase();
-      return name.startsWith(target) || target.startsWith(name);
-    }) ||
-    null
-  );
-}
+const normalize = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 
 async function main() {
-  const products = await prisma.product.findMany({ select: { id: true, name: true } });
-  let inserted = 0;
-  let skipped = 0;
+  const user = await prisma.user.findUnique({
+    where: { email: ASEP_EMAIL },
+    select: { id: true, email: true },
+  });
+  if (!user) throw new Error(`Akun pembeli ${ASEP_EMAIL} tidak ditemukan.`);
 
-  for (const group of LEGACY_REVIEWS) {
-    const product = findProduct(products, group.productName);
-    if (!product) {
-      console.warn(`Produk tidak ditemukan, ulasan dilewati: ${group.productName}`);
-    }
+  const buyer = await prisma.profile.findUnique({
+    where: { id: user.id },
+    select: { id: true, full_name: true, username: true },
+  });
+  if (!buyer) throw new Error("Profil pembeli tidak ditemukan.");
+  const reviewerName = buyer.full_name || buyer.username || "Asep Mulyadi";
 
-    for (const [index, review] of group.reviews.entries()) {
-      const productId = product ? product.id : null;
-      const existing = await prisma.review.findFirst({
-        where: {
-          product_id: productId,
-          product_name: product ? product.name : group.productName,
-          reviewer_name: review.name,
-          comment: review.comment,
+  const sellers = await prisma.profile.findMany({
+    where: { role: "seller" },
+    select: { id: true, store_name: true, full_name: true },
+  });
+  const store = sellers.find(
+    (s) => normalize(s.store_name || s.full_name) === normalize(STORE_NAME)
+  );
+  if (!store) throw new Error(`Toko ${STORE_NAME} tidak ditemukan.`);
+
+  // Hanya produk dengan penjualan valid yang memang tampil di profil toko.
+  const snapshot = await finance.buildPlatformFinance();
+  const soldRows = snapshot.topProducts.filter((row) => Number(row.units_sold) > 0);
+  const soldIds = new Set(soldRows.map((row) => row.id).filter(Boolean));
+  const soldNames = new Set(soldRows.map((row) => normalize(row.name)));
+  const products = await prisma.product.findMany({
+    where: { seller_id: store.id, status: "active" },
+    select: { id: true, name: true },
+  });
+  const soldProducts = products.filter(
+    (product) => soldIds.has(product.id) || soldNames.has(normalize(product.name))
+  );
+
+  // Ulasan hanya boleh berasal dari pesanan selesai milik Asep di toko ini.
+  const completedOrders = await prisma.order.findMany({
+    where: { buyer_id: user.id, status: "completed" },
+    select: { id: true },
+  });
+  const orderIds = completedOrders.map((order) => order.id);
+  const items = orderIds.length
+    ? await prisma.orderItem.findMany({
+        where: { order_id: { in: orderIds } },
+        orderBy: { created_at: "desc" },
+        select: {
+          id: true,
+          order_id: true,
+          product_id: true,
+          product_name: true,
+          seller_id: true,
         },
-        select: { id: true },
-      });
+      })
+    : [];
 
-      if (existing) {
-        skipped += 1;
-        continue;
-      }
+  const selections = [];
+  const seenProducts = new Set();
+  for (const item of items) {
+    if (item.seller_id && item.seller_id !== store.id) continue;
+    const product = soldProducts.find(
+      (p) =>
+        (item.product_id && p.id === item.product_id) ||
+        normalize(p.name) === normalize(item.product_name)
+    );
+    if (!product || seenProducts.has(product.id)) continue;
+    seenProducts.add(product.id);
+    selections.push({ product, item });
+  }
 
-      const createdAt = new Date(Date.now() - (index + 1) * 24 * 60 * 60 * 1000);
-      await prisma.review.create({
-        data: {
-          product_id: productId,
-          product_name: product ? product.name : group.productName,
-          order_id: null,
-          order_item_id: null,
-          buyer_id: null,
-          reviewer_name: review.name,
-          rating: review.rating,
-          comment: review.comment,
-          created_at: createdAt,
-          updated_at: createdAt,
-        },
-      });
-      inserted += 1;
+  // Ulasan contoh lama tidak punya pembeli; hapus semuanya.
+  const legacyRemoved = await prisma.review.deleteMany({
+    where: { buyer_id: null, order_item_id: null },
+  });
+
+  // Asep hanya boleh punya satu ulasan per produk, pada item yang masih valid.
+  const asepReviews = await prisma.review.findMany({
+    where: { buyer_id: user.id },
+    select: { id: true, product_id: true, order_item_id: true },
+  });
+  const validItemIds = new Set(selections.map((selection) => selection.item.id));
+  const obsolete = asepReviews.filter(
+    (review) => !review.order_item_id || !validItemIds.has(review.order_item_id)
+  );
+  for (const review of obsolete) {
+    await prisma.review.delete({ where: { id: review.id } });
+  }
+
+  const remaining = asepReviews.filter((review) => !obsolete.includes(review));
+  const byProduct = new Map();
+  for (const review of remaining) {
+    const key = review.product_id || "tanpa-produk";
+    if (!byProduct.has(key)) byProduct.set(key, []);
+    byProduct.get(key).push(review);
+  }
+  let duplicatesRemoved = 0;
+  for (const rows of byProduct.values()) {
+    for (const review of rows.slice(1)) {
+      await prisma.review.delete({ where: { id: review.id } });
+      duplicatesRemoved += 1;
     }
   }
 
-  console.log(`Ulasan baru: ${inserted}, sudah ada sebelumnya: ${skipped}.`);
+  let inserted = 0;
+  let skipped = 0;
+  for (const { product, item } of selections) {
+    const existing = await prisma.review.findFirst({ where: { order_item_id: item.id } });
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+    const content = REVIEW_CONTENT[normalize(product.name)] || FALLBACK_REVIEW;
+    const now = new Date();
+    await prisma.review.create({
+      data: {
+        product_id: product.id,
+        product_name: product.name,
+        order_id: item.order_id,
+        order_item_id: item.id,
+        buyer_id: user.id,
+        reviewer_name: reviewerName,
+        rating: content.rating,
+        comment: content.comment,
+        created_at: now,
+        updated_at: now,
+      },
+    });
+    inserted += 1;
+  }
+
+  console.log(`Ulasan contoh dihapus: ${legacyRemoved.count}.`);
+  console.log(`Ulasan Asep tidak relevan dihapus: ${obsolete.length}. Duplikat dihapus: ${duplicatesRemoved}.`);
+  console.log(`Ulasan baru: ${inserted}, sudah ada: ${skipped}.`);
+  selections.forEach(({ product }) => console.log(`- ${product.name}`));
 }
 
 main()
   .catch((err) => {
-    console.error("Gagal memasukkan ulasan:", err.message);
+    console.error("Gagal menyiapkan ulasan:", err.message);
     process.exitCode = 1;
   })
   .finally(async () => {

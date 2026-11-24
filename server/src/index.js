@@ -284,6 +284,52 @@ function summarizeReviews(reviews) {
   };
 }
 
+function toReviewRating(value) {
+  const rating = Math.round(Number(value) || 0);
+  return rating >= 1 && rating <= 5 ? rating : null;
+}
+
+/** Ringkasan angka rating tanpa menggantungkan UI ke data mock. */
+function summarizeRatingValues(values) {
+  const ratings = values.map(toReviewRating).filter(Boolean);
+  const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  ratings.forEach((rating) => {
+    breakdown[rating] += 1;
+  });
+  return {
+    count: ratings.length,
+    average: ratings.length
+      ? Number((ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length).toFixed(1))
+      : 0,
+    breakdown,
+  };
+}
+
+function indexReviewRatings(reviews) {
+  const byId = new Map();
+  const byName = new Map();
+  for (const review of reviews) {
+    const rating = toReviewRating(review.rating);
+    if (!rating) continue;
+    if (review.product_id) {
+      if (!byId.has(review.product_id)) byId.set(review.product_id, []);
+      byId.get(review.product_id).push(rating);
+    } else if (review.product_name) {
+      const key = normalizeProductName(review.product_name);
+      if (!byName.has(key)) byName.set(key, []);
+      byName.get(key).push(rating);
+    }
+  }
+  return { byId, byName };
+}
+
+function reviewRatingsForProduct(index, product) {
+  return [
+    ...(index.byId.get(product.id) || []),
+    ...(index.byName.get(normalizeProductName(product.name)) || []),
+  ];
+}
+
 const REVIEW_MEDIA_LIMIT = 5;
 
 // Media ulasan disimpan sebagai array JSON: [{ type: "image" | "video", url }].
@@ -1146,11 +1192,33 @@ app.get("/api/products", optionalUser, async (req, res) => {
   } catch {
     /* Jika agregat gagal, produk tetap tampil dengan sold = 0. */
   }
+
+  // Rating produk dan toko juga berasal dari ulasan di database, bukan angka mock.
+  const reviews = await prisma.review.findMany({
+    select: { product_id: true, product_name: true, rating: true },
+  });
+  const reviewIndex = indexReviewRatings(reviews);
+  const storeRatingValues = new Map();
+  products.forEach((row) => {
+    if (!row.seller_id) return;
+    if (!storeRatingValues.has(row.seller_id)) storeRatingValues.set(row.seller_id, []);
+    storeRatingValues.get(row.seller_id).push(...reviewRatingsForProduct(reviewIndex, row));
+  });
+  const storeRatingSummary = new Map(
+    [...storeRatingValues].map(([sellerId, values]) => [sellerId, summarizeRatingValues(values)])
+  );
+
   res.json({
-    products: products.map((row) => ({
-      ...mapProduct(row),
-      sold: soldByProduct.get(row.id) ?? soldByName.get(row.name) ?? 0,
-    })),
+    products: products.map((row) => {
+      const rating = summarizeRatingValues(reviewRatingsForProduct(reviewIndex, row));
+      return {
+        ...mapProduct(row),
+        sold: soldByProduct.get(row.id) ?? soldByName.get(row.name) ?? 0,
+        rating: rating.average,
+        review_count: rating.count,
+        store_rating: storeRatingSummary.get(row.seller_id)?.average || 0,
+      };
+    }),
   });
 });
 
@@ -1267,7 +1335,13 @@ app.get("/api/stores", async (_req, res) => {
   const stores = await prisma.profile.findMany({ where: { role: "seller" }, orderBy: { created_at: "desc" } });
   const users = await prisma.user.findMany({ select: { id: true, email: true } });
   const emailById = Object.fromEntries(users.map((u) => [u.id, u.email]));
-  const products = await prisma.product.findMany({ select: { seller_id: true, status: true } });
+  const products = await prisma.product.findMany({
+    select: { id: true, seller_id: true, status: true, name: true },
+  });
+  const reviews = await prisma.review.findMany({
+    select: { product_id: true, product_name: true, rating: true },
+  });
+  const reviewIndex = indexReviewRatings(reviews);
   const countBySeller = {};
   const activeBySeller = {};
   products.forEach((p) => {
@@ -1276,14 +1350,21 @@ app.get("/api/stores", async (_req, res) => {
   });
 
   res.json({
-    stores: stores.map((s) => ({
-      ...s,
-      email: emailById[s.id] || null,
-      product_count: countBySeller[s.id] || 0,
-      active_product_count: activeBySeller[s.id] || 0,
-      rating: 4.8,
-      verified: s.seller_status === "verified",
-    })),
+    stores: stores.map((s) => {
+      const sellerProducts = products.filter((p) => p.seller_id === s.id);
+      const ratings = sellerProducts.flatMap((p) => reviewRatingsForProduct(reviewIndex, p));
+      const summary = summarizeRatingValues(ratings);
+      return {
+        ...s,
+        email: emailById[s.id] || null,
+        product_count: countBySeller[s.id] || 0,
+        active_product_count: activeBySeller[s.id] || 0,
+        rating: summary.average,
+        review_count: summary.count,
+        rating_breakdown: summary.breakdown,
+        verified: s.seller_status === "verified",
+      };
+    }),
   });
 });
 
@@ -2087,8 +2168,25 @@ app.get("/api/reviews", optionalUser, async (req, res) => {
     const productId = req.query.productId ? String(req.query.productId) : null;
     const productName = req.query.productName ? String(req.query.productName) : null;
     const orderId = req.query.orderId ? String(req.query.orderId) : null;
+    const sellerId = req.query.sellerId ? String(req.query.sellerId) : null;
     const where = {};
     if (orderId) where.order_id = orderId;
+
+    if (sellerId) {
+      const sellerProducts = await prisma.product.findMany({
+        where: { seller_id: sellerId },
+        select: { id: true, name: true },
+      });
+      const sellerConditions = [];
+      if (sellerProducts.length) {
+        sellerConditions.push({ product_id: { in: sellerProducts.map((p) => p.id) } });
+        sellerConditions.push({ product_name: { in: sellerProducts.map((p) => p.name) } });
+      }
+      if (!sellerConditions.length) {
+        return res.json({ reviews: [], summary: summarizeReviews([]) });
+      }
+      where.AND = [{ OR: sellerConditions }];
+    }
 
     const hasProductFilter = Boolean(productId || productName);
     if (hasProductFilter) {

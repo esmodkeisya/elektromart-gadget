@@ -122,9 +122,19 @@ export function BestSellerCard({
             {formatRupiah(item.originalPrice)}
           </p>
         )}
-        <div className="mt-2 flex items-center gap-1 text-xs text-slate-500">
-          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-          <span className="font-medium text-slate-700">{item.rating}</span>
+        <div className="mt-2 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+          {item.rating && item.reviewCount ? (
+            <>
+              <span className="flex items-center gap-1 font-medium text-slate-700">
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                {item.rating}
+              </span>
+              <span>&middot;</span>
+              <span>{item.reviewCount} {t("product.reviews")}</span>
+            </>
+          ) : (
+            <span>{t("product.noReviews")}</span>
+          )}
           <span>&middot;</span>
           <span>{item.sold} {t("soldCount")}</span>
         </div>

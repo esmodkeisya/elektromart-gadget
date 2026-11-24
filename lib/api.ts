@@ -122,6 +122,9 @@ export type ProductRecord = {
   width_cm?: number;
   height_cm?: number;
   sold?: number;
+  rating?: number;
+  review_count?: number;
+  store_rating?: number;
   is_flash_sale?: boolean;
   flash_sale_quota?: number;
   flash_sale_sold?: number;

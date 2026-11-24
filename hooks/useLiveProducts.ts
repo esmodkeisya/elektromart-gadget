@@ -56,7 +56,8 @@ export function recordToProduct(record: ProductRecord): Product {
     price: Number(record.price) || 0,
     image: record.image_url || images[0] || "",
     images: images.length ? images : undefined,
-    rating: 4.8,
+    rating: Number(record.rating) || 0,
+    reviewCount: Number(record.review_count) || 0,
     sold: Number(record.sold) || 0,
     location: "Jakarta",
     category: record.category || undefined,
@@ -70,7 +71,7 @@ export function recordToProduct(record: ProductRecord): Product {
     store: {
       name: "Jaya store",
       location: "Jakarta",
-      rating: 4.8,
+      rating: Number(record.store_rating) || 0,
       verified: true,
     },
   };
@@ -86,6 +87,18 @@ export function applyLiveProduct(product: Product, live: ProductRecord[]): Produ
   return {
     ...product,
     name: db.name || product.name,
+    rating: db.rating === undefined ? product.rating : Number(db.rating) || 0,
+    reviewCount:
+      db.review_count === undefined ? product.reviewCount : Number(db.review_count) || 0,
+    store: product.store
+      ? {
+          ...product.store,
+          rating:
+            db.store_rating === undefined
+              ? product.store.rating
+              : Number(db.store_rating) || 0,
+        }
+      : product.store,
     price: Number(db.price) || product.price,
     stock: db.stock,
     category: db.category || product.category,

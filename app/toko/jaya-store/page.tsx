@@ -6,7 +6,7 @@ import { Star, Store as StoreIcon, BadgeCheck, CalendarDays, Package, MapPin } f
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { BestSellerCard } from "@/components/produk/ProductCard";
-import { api } from "@/lib/api";
+import { api, type ReviewRecord } from "@/lib/api";
 import { slugify } from "@/lib/slugify";
 import { recordToProduct, useLiveProducts } from "@/hooks/useLiveProducts";
 import { useLanguage } from "@/lib/i18n";
@@ -20,6 +20,8 @@ type StoreRecord = {
   email?: string | null;
   seller_status?: string | null;
   rating?: number;
+  review_count?: number;
+  rating_breakdown?: Record<"1" | "2" | "3" | "4" | "5", number>;
   verified?: boolean;
   created_at?: string;
   product_count?: number;
@@ -27,14 +29,6 @@ type StoreRecord = {
 };
 
 const STORE_SLUG = "jaya-store";
-
-const ratingBars = [
-  { star: 5, percent: 80, count: 250 },
-  { star: 4, percent: 18, count: 56 },
-  { star: 3, percent: 2, count: 6 },
-  { star: 2, percent: 0, count: 0 },
-  { star: 1, percent: 0, count: 0 },
-];
 
 function formatDate(value?: string | null) {
   if (!value) return "-";
@@ -53,6 +47,7 @@ export default function StorePage() {
   const { t } = useLanguage();
   const liveProducts = useLiveProducts();
   const [store, setStore] = useState<StoreRecord | null>(null);
+  const [reviews, setReviews] = useState<ReviewRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -76,6 +71,24 @@ export default function StorePage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!store?.id) {
+      setReviews([]);
+      return;
+    }
+    let active = true;
+    void api<{ reviews: ReviewRecord[] }>(`/api/reviews?sellerId=${encodeURIComponent(store.id)}`)
+      .then((data) => {
+        if (active) setReviews(data.reviews || []);
+      })
+      .catch(() => {
+        if (active) setReviews([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [store?.id]);
+
   const products = useMemo(() => {
     let list = store ? liveProducts.filter((p) => p.seller_id === store.id) : liveProducts;
     return list.filter((p) => p.status === "active").map(recordToProduct);
@@ -83,7 +96,16 @@ export default function StorePage() {
 
   const storeName = store?.store_name || "Jaya store";
   const location = store?.store_address || "Jakarta";
-  const rating = store?.rating ?? 4.8;
+  const rating = Number(store?.rating) || 0;
+  const reviewCount = Number(store?.review_count) || 0;
+  const ratingBars = useMemo(() => {
+    const breakdown: Partial<Record<"1" | "2" | "3" | "4" | "5", number>> =
+      store?.rating_breakdown || {};
+    return [5, 4, 3, 2, 1].map((star) => {
+      const count = Number(breakdown[String(star) as "1" | "2" | "3" | "4" | "5"]) || 0;
+      return { star, count, percent: reviewCount ? (count / reviewCount) * 100 : 0 };
+    });
+  }, [store, reviewCount]);
   const joinedAt = formatDate(store?.created_at || new Date().toISOString());
   const productCount = store?.active_product_count ?? products.length;
   const verified = store?.verified ?? true;
@@ -123,13 +145,19 @@ export default function StorePage() {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2.5 sm:mb-1">
-                <Star className="h-5 w-5 fill-amber-400 text-amber-400" />
-                <div>
-                  <p className="text-lg font-bold leading-none text-navy-900">{rating.toFixed(1)}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">{t("store.reviews", { count: ratingBars.reduce((sum, b) => sum + b.count, 0) })}</p>
+              {reviewCount > 0 ? (
+                <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2.5 sm:mb-1">
+                  <Star className="h-5 w-5 fill-amber-400 text-amber-400" />
+                  <div>
+                    <p className="text-lg font-bold leading-none text-navy-900">{rating.toFixed(1)}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{t("store.reviews", { count: reviewCount })}</p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-xl bg-slate-50 px-4 py-2.5 sm:mb-1">
+                  <p className="text-xs text-slate-500">{t("product.noReviews")}</p>
+                </div>
+              )}
             </div>
 
             <div className="mt-5 grid gap-4 border-t border-slate-100 pt-5 text-sm sm:grid-cols-3 lg:grid-cols-[1.6fr_1fr_1fr]">
@@ -187,28 +215,70 @@ export default function StorePage() {
           <div className="h-max space-y-5 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:self-start">
             <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
               <h2 className="text-lg font-bold text-navy-900">{t("store.ratingTitle")}</h2>
-              <div className="mt-4 flex items-center gap-4">
-                <p className="text-5xl font-extrabold text-navy-900">{rating.toFixed(1)}</p>
-                <div>
-                  <div className="flex items-center gap-0.5">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Star key={i} className={`h-4 w-4 ${i < Math.round(rating) ? "fill-amber-400 text-amber-400" : "text-slate-200"}`} />
+              {reviewCount > 0 ? (
+                <>
+                  <div className="mt-4 flex items-center gap-4">
+                    <p className="text-5xl font-extrabold text-navy-900">{rating.toFixed(1)}</p>
+                    <div>
+                      <div className="flex items-center gap-0.5">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star key={i} className={`h-4 w-4 ${i < Math.round(rating) ? "fill-amber-400 text-amber-400" : "text-slate-200"}`} />
+                        ))}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{t("store.ratingBasedOn")}</p>
+                    </div>
+                  </div>
+                  <div className="mt-5 space-y-2.5">
+                    {ratingBars.map((bar) => (
+                      <div key={bar.star} className="flex items-center gap-2 text-xs text-slate-500">
+                        <span className="w-6 shrink-0">{bar.star}★</span>
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                          <div className="h-full rounded-full bg-amber-400" style={{ width: `${bar.percent}%` }} />
+                        </div>
+                        <span className="w-8 shrink-0 text-right">{bar.count}</span>
+                      </div>
                     ))}
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">{t("store.ratingBasedOn")}</p>
-                </div>
-              </div>
-              <div className="mt-5 space-y-2.5">
-                {ratingBars.map((bar) => (
-                  <div key={bar.star} className="flex items-center gap-2 text-xs text-slate-500">
-                    <span className="w-6 shrink-0">{bar.star}★</span>
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
-                      <div className="h-full rounded-full bg-amber-400" style={{ width: `${bar.percent}%` }} />
-                    </div>
-                    <span className="w-8 shrink-0 text-right">{bar.count}</span>
+                </>
+              ) : (
+                <p className="mt-4 text-sm text-slate-500">{t("product.noReviews")}</p>
+              )}
+
+              {reviews.length > 0 ? (
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {t("product.reviews")}
+                  </p>
+                  <div className="mt-3 space-y-3">
+                    {reviews.map((review) => (
+                      <div key={review.id} className="rounded-lg bg-slate-50 p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-xs font-semibold text-navy-900">{review.reviewer_name}</p>
+                          <span className="shrink-0 text-[10px] text-slate-400">
+                            {new Date(review.created_at).toLocaleDateString("id-ID", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-0.5">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Star
+                              key={i}
+                              className={`h-3 w-3 ${i < review.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"}`}
+                            />
+                          ))}
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-400">{review.product_name}</p>
+                        {review.comment ? (
+                          <p className="mt-1 text-xs leading-relaxed text-slate-600">{review.comment}</p>
+                        ) : null}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-card">

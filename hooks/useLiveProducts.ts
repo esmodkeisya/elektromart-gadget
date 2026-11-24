@@ -57,7 +57,7 @@ export function recordToProduct(record: ProductRecord): Product {
     image: record.image_url || images[0] || "",
     images: images.length ? images : undefined,
     rating: 4.8,
-    sold: 0,
+    sold: Number(record.sold) || 0,
     location: "Jakarta",
     category: record.category || undefined,
     description: record.description || undefined,

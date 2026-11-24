@@ -101,47 +101,70 @@ export default function StorePage() {
 
         {/* Header Toko */}
         <div className="mt-4 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-card">
-          <div className="h-24 bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500" />
-          <div className="flex flex-col gap-4 px-6 pb-6 sm:flex-row sm:items-end">
-            <span className="-mt-9 flex h-20 w-20 items-center justify-center rounded-2xl border-4 border-white bg-blue-50 text-brand-blue">
-              {store?.avatar_url ? (
-                <img src={store.avatar_url} alt={storeName} className="h-full w-full rounded-xl object-cover" />
-              ) : (
-                <StoreIcon className="h-9 w-9" />
-              )}
-            </span>
-            <div className="flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-bold text-navy-900">{storeName}</h1>
-                {verified && (
-                  <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-600">
-                    <BadgeCheck className="h-3.5 w-3.5" /> {t("store.verified")}
-                  </span>
-                )}
+          <div className="h-32 bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500" />
+          <div className="px-6 pb-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex min-w-0 items-end gap-4">
+                <span className="-mt-12 flex h-24 w-24 shrink-0 items-center justify-center rounded-2xl border-4 border-white bg-blue-50 text-brand-blue shadow-sm">
+                  {store?.avatar_url ? (
+                    <img src={store.avatar_url} alt={storeName} className="h-full w-full rounded-xl object-cover" />
+                  ) : (
+                    <StoreIcon className="h-10 w-10" />
+                  )}
+                </span>
+                <div className="min-w-0 pb-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h1 className="text-2xl font-bold text-navy-900">{storeName}</h1>
+                    {verified && (
+                      <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-600">
+                        <BadgeCheck className="h-3.5 w-3.5" /> {t("store.verified")}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
-                <span className="flex items-center gap-1">
-                  <MapPin className="h-3.5 w-3.5" /> {location}
-                </span>
-                <span className="flex items-center gap-1">
-                  <CalendarDays className="h-3.5 w-3.5" /> {t("store.joined")} {joinedAt}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Package className="h-3.5 w-3.5" /> {t("store.productsCount", { count: productCount })}
-                </span>
+              <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2.5 sm:mb-1">
+                <Star className="h-5 w-5 fill-amber-400 text-amber-400" />
+                <div>
+                  <p className="text-lg font-bold leading-none text-navy-900">{rating.toFixed(1)}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{t("store.reviews", { count: ratingBars.reduce((sum, b) => sum + b.count, 0) })}</p>
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2.5">
-              <Star className="h-5 w-5 fill-amber-400 text-amber-400" />
-              <div>
-                <p className="text-lg font-bold leading-none text-navy-900">{rating.toFixed(1)}</p>
-                <p className="mt-0.5 text-xs text-slate-500">{t("store.reviews", { count: ratingBars.reduce((sum, b) => sum + b.count, 0) })}</p>
+
+            <div className="mt-5 grid gap-4 border-t border-slate-100 pt-5 text-sm sm:grid-cols-3 lg:grid-cols-[1.6fr_1fr_1fr]">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                  <MapPin className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-400">{t("store.location")}</p>
+                  <p className="line-clamp-2 font-medium text-navy-900">{location}</p>
+                </div>
+              </div>
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                  <CalendarDays className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-400">{t("store.joined")}</p>
+                  <p className="font-medium text-navy-900">{joinedAt}</p>
+                </div>
+              </div>
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                  <Package className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-400">{t("store.products")}</p>
+                  <p className="font-medium text-navy-900">{t("store.productsCount", { count: productCount })}</p>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="mt-6 grid gap-5 lg:grid-cols-[1.6fr_1fr]">
+        <div className="mt-6 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
           {/* Produk Toko */}
           <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
             <div className="mb-4 flex items-center justify-between">
@@ -152,16 +175,16 @@ export default function StorePage() {
             ) : products.length === 0 ? (
               <p className="py-10 text-center text-sm text-slate-400">{t("store.noProducts")}</p>
             ) : (
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
                 {products.map((product) => (
-                  <BestSellerCard key={product.id} product={product} />
+                  <BestSellerCard key={product.id} product={product} imageContain />
                 ))}
               </div>
             )}
           </div>
 
           {/* Penilaian Toko */}
-          <div className="h-max space-y-5 lg:sticky lg:top-4">
+          <div className="h-max space-y-5 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:self-start">
             <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
               <h2 className="text-lg font-bold text-navy-900">{t("store.ratingTitle")}</h2>
               <div className="mt-4 flex items-center gap-4">

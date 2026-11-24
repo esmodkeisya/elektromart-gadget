@@ -31,10 +31,10 @@ const STATUS_STYLES: Record<string, { labelKey: string; cls: string }> = {
 };
 
 const STEP_META = [
-  { code: "waiting_payment", icon: ReceiptText, labelKey: "track.stepCreated", statuses: ["waiting_payment", "paid", "shipped", "completed"] },
-  { code: "paid", icon: Clock, labelKey: "track.stepPaid", statuses: ["paid", "shipped", "completed"] },
-  { code: "shipped", icon: Truck, labelKey: "track.stepShipped", statuses: ["shipped", "completed"] },
-  { code: "completed", icon: Home, labelKey: "track.stepCompleted", statuses: ["completed"] },
+  { code: "waiting_payment", icon: ReceiptText, labelKey: "track.stepCreated" },
+  { code: "paid", icon: Clock, labelKey: "track.stepPaid" },
+  { code: "shipped", icon: Truck, labelKey: "track.stepShipped" },
+  { code: "completed", icon: Home, labelKey: "track.stepCompleted" },
 ];
 
 const EVENT_LABEL: Record<string, string> = {
@@ -97,13 +97,19 @@ export default function TrackOrderPage() {
     return STATUS_STYLES[order.status] || { labelKey: "admin.orders", cls: "bg-slate-100 text-slate-600" };
   }, [order]);
 
+  const currentStep = useMemo(() => {
+    if (!order || order.status === "cancelled") return -1;
+    const index = STEP_META.findIndex((step) => step.code === order.status);
+    return index >= 0 ? index : 0;
+  }, [order]);
+
   const timeline = useMemo(() => [...events].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()), [events]);
 
   return (
     <main className="flex min-h-screen flex-col bg-surface">
       <Navbar />
 
-      <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
         <Link
           href="/profil"
           className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-navy-900"
@@ -147,45 +153,57 @@ export default function TrackOrderPage() {
                 ) : null}
               </div>
 
-              {/* Step progress */}
+              {/* Step progress: satu garis utuh dari langkah pertama hingga terakhir */}
               {order.status === "cancelled" ? (
                 <div className="mt-6 flex items-center gap-2 rounded-xl bg-[#FDECEC] px-4 py-3 text-sm font-medium text-[#E11D48]">
                   <XCircle className="h-4 w-4" />
                   {t("track.cancelledNotice")}
                 </div>
               ) : (
-                <div className="mt-7 flex items-start justify-between gap-1">
-                  {STEP_META.map((step, index) => {
-                    const active = step.statuses.includes(order.status);
-                    const Icon = step.icon;
-                    return (
-                      <div key={step.code} className="flex flex-1 flex-col items-center text-center">
-                        <div className="flex w-full items-center">
-                          <span className={`h-0.5 flex-1 ${index === 0 ? "bg-transparent" : active ? "bg-brand-blue" : "bg-slate-200"}`} />
+                <div className="mt-8">
+                  <div className="relative grid grid-cols-4">
+                    <span className="absolute left-[12.5%] right-[12.5%] top-4 h-0.5 bg-slate-200" />
+                    {currentStep > 0 ? (
+                      <span
+                        className="absolute left-[12.5%] top-4 h-0.5 bg-brand-blue"
+                        style={{ width: `${(currentStep / (STEP_META.length - 1)) * 75}%` }}
+                      />
+                    ) : null}
+                    {STEP_META.map((step, index) => {
+                      const done = index < currentStep;
+                      const current = index === currentStep;
+                      const Icon = step.icon;
+                      return (
+                        <div key={step.code} className="relative flex flex-col items-center text-center">
                           <span
-                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 ${
-                              active ? "border-brand-blue bg-brand-blue text-white" : "border-slate-200 bg-white text-slate-300"
+                            className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 ${
+                              done
+                                ? "border-brand-blue bg-brand-blue text-white"
+                                : current
+                                  ? "border-brand-blue bg-white text-brand-blue ring-4 ring-blue-100"
+                                  : "border-slate-200 bg-white text-slate-300"
                             }`}
                           >
-                            <Icon className="h-4 w-4" />
+                            {done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
                           </span>
-                          <span
-                            className={`h-0.5 flex-1 ${
-                              index === STEP_META.length - 1 ? "bg-transparent" : STEP_META[index + 1].statuses.includes(order.status) ? "bg-brand-blue" : "bg-slate-200"
+                          <p
+                            className={`mt-2 text-[11px] font-semibold ${
+                              current ? "text-brand-blue" : done ? "text-navy-900" : "text-slate-400"
                             }`}
-                          />
+                          >
+                            {t(step.labelKey)}
+                          </p>
                         </div>
-                        <p className={`mt-2 text-[11px] font-semibold ${active ? "text-navy-900" : "text-slate-400"}`}>{t(step.labelKey)}</p>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
 
-            <div className="mt-5 grid gap-5 lg:grid-cols-5">
-              {/* Timeline */}
-              <div className="lg:col-span-3">
+            <div className="mt-5 grid items-start gap-5 lg:grid-cols-5">
+              {/* Kolom kiri: riwayat, produk, dan rincian biaya */}
+              <div className="space-y-5 lg:col-span-3">
                 <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
                   <h2 className="text-sm font-bold text-navy-900">{t("track.timelineTitle")}</h2>
                   {timeline.length === 0 ? (
@@ -199,16 +217,16 @@ export default function TrackOrderPage() {
                             <div className="flex flex-col items-center">
                               <span
                                 className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                                  isLatest ? "bg-brand-blue text-white" : "bg-slate-100 text-slate-400"
+                                  isLatest ? "bg-brand-blue text-white ring-4 ring-blue-100" : "bg-blue-50 text-brand-blue"
                                 }`}
                               >
-                                {isLatest ? <Check className="h-4 w-4" /> : <span className="h-2 w-2 rounded-full bg-slate-300" />}
+                                <Check className="h-4 w-4" />
                               </span>
-                              {index < timeline.length - 1 ? <span className="my-1 w-0.5 flex-1 bg-slate-200" /> : null}
+                              {index < timeline.length - 1 ? <span className="my-1 w-0.5 flex-1 bg-blue-100" /> : null}
                             </div>
                             <div className={`flex-1 ${index < timeline.length - 1 ? "pb-5" : ""}`}>
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className={`text-sm font-semibold ${isLatest ? "text-navy-900" : "text-slate-600"}`}>
+                                <p className={`text-sm ${isLatest ? "font-bold text-navy-900" : "font-medium text-slate-700"}`}>
                                   {EVENT_LABEL[event.code] ? t(EVENT_LABEL[event.code]) : event.code}
                                 </p>
                                 <span className="text-[11px] text-slate-400">{formatDateTime(event.created_at)}</span>
@@ -227,10 +245,60 @@ export default function TrackOrderPage() {
                     </ol>
                   )}
                 </div>
+
+                {/* Items & total: langsung di bawah riwayat pengiriman */}
+                <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
+                  <h2 className="text-sm font-bold text-navy-900">{t("track.itemsTitle")}</h2>
+                  <ul className="mt-4 space-y-3">
+                    {(order.items || []).map((item) => (
+                      <li key={item.id} className="flex items-center gap-3">
+                        {item.product_image ? (
+                          <img src={item.product_image} alt="" className="h-12 w-12 rounded-lg border border-slate-100 object-cover" />
+                        ) : (
+                          <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-50">
+                            <Package className="h-5 w-5 text-slate-300" />
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-navy-900">{item.product_name}</p>
+                          <p className="text-xs text-slate-400">
+                            {formatRupiah(item.price)} × {item.qty}
+                          </p>
+                        </div>
+                        <span className="text-sm font-semibold text-navy-900">{formatRupiah(item.subtotal)}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">{t("track.subtotal")}</span>
+                      <span className="font-medium text-navy-900">{formatRupiah(order.subtotal)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">{t("track.shippingFee")}</span>
+                      <span className="font-medium text-navy-900">{order.shipping_fee > 0 ? formatRupiah(order.shipping_fee) : "-"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">{t("track.insuranceFee")}</span>
+                      <span className="font-medium text-navy-900">{order.insurance_fee > 0 ? formatRupiah(order.insurance_fee) : "-"}</span>
+                    </div>
+                    {(order.packing_fee || 0) > 0 ? (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">{t("track.packingFee")}</span>
+                        <span className="font-medium text-navy-900">{formatRupiah(order.packing_fee || 0)}</span>
+                      </div>
+                    ) : null}
+                    <div className="flex justify-between border-t border-slate-100 pt-2">
+                      <span className="font-semibold text-navy-900">{t("track.total")}</span>
+                      <span className="text-lg font-bold text-brand-blue">{formatRupiah(order.total)}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              {/* Courier + address */}
-              <div className="space-y-5 lg:col-span-2">
+              {/* Courier + address: ringkas dan melekat di bawah navigasi */}
+              <div className="space-y-5 lg:col-span-2 lg:sticky lg:top-20 lg:self-start">
                 <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
                   <div className="flex items-center gap-2">
                     <Truck className="h-4 w-4 text-brand-blue" />
@@ -275,50 +343,6 @@ export default function TrackOrderPage() {
                   ) : (
                     <p className="mt-3 text-xs text-slate-500">{t("track.notAvailable")}</p>
                   )}
-                </div>
-              </div>
-            </div>
-
-            {/* Items & total */}
-            <div className="mt-5 rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
-              <h2 className="text-sm font-bold text-navy-900">{t("track.itemsTitle")}</h2>
-              <ul className="mt-4 space-y-3">
-                {(order.items || []).map((item) => (
-                  <li key={item.id} className="flex items-center gap-3">
-                    {item.product_image ? (
-                      <img src={item.product_image} alt="" className="h-12 w-12 rounded-lg border border-slate-100 object-cover" />
-                    ) : (
-                      <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-50">
-                        <Package className="h-5 w-5 text-slate-300" />
-                      </span>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-navy-900">{item.product_name}</p>
-                      <p className="text-xs text-slate-400">
-                        {formatRupiah(item.price)} × {item.qty}
-                      </p>
-                    </div>
-                    <span className="text-sm font-semibold text-navy-900">{formatRupiah(item.subtotal)}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">{t("track.subtotal")}</span>
-                  <span className="font-medium text-navy-900">{formatRupiah(order.subtotal)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">{t("track.shippingFee")}</span>
-                  <span className="font-medium text-navy-900">{order.shipping_fee > 0 ? formatRupiah(order.shipping_fee) : "-"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">{t("track.insuranceFee")}</span>
-                  <span className="font-medium text-navy-900">{order.insurance_fee > 0 ? formatRupiah(order.insurance_fee) : "-"}</span>
-                </div>
-                <div className="flex justify-between border-t border-slate-100 pt-2">
-                  <span className="font-semibold text-navy-900">{t("track.total")}</span>
-                  <span className="text-lg font-bold text-brand-blue">{formatRupiah(order.total)}</span>
                 </div>
               </div>
             </div>

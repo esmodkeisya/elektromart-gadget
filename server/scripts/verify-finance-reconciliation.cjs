@@ -43,70 +43,70 @@ async function main() {
   const validRawItems = rawItems.filter((item) => validIds.has(item.order_id));
 
   // R1 — Populasi pesanan pasca pembersihan DEMO.
-  check("R1", "Jumlah pesanan: 13 valid, 34 batal, 3 waiting (total 50)", {
+  check("R1", "Jumlah pesanan: 16 valid, 34 batal, 3 waiting (total 53)", {
     total: snapshot.summary.totalOrders,
     valid: snapshot.summary.validOrders,
     cancelled: snapshot.summary.cancelledOrders,
     waiting: snapshot.summary.waitingOrders,
-  }, { total: 50, valid: 13, cancelled: 34, waiting: 3 });
+  }, { total: 53, valid: 16, cancelled: 34, waiting: 3 });
 
   // R2 — Penjualan kotor = Σ qty × harga satuan, tanpa ongkir.
   const recomputedGross = validRawItems.reduce((sum, item) => sum + n(item.qty) * n(item.price), 0);
-  check("R2", "Penjualan kotor = Σ qty × harga satuan = Rp200.182.000", {
+  check("R2", "Penjualan kotor = Σ qty × harga satuan = Rp242.180.000", {
     fromItems: recomputedGross,
     summary: snapshot.summary.gross,
     shippingExcluded: snapshot.summary.gross !== snapshot.summary.gmv,
-  }, { fromItems: 200182000, summary: 200182000, shippingExcluded: true });
+  }, { fromItems: 242180000, summary: 242180000, shippingExcluded: true });
 
   // R3 — Unit terjual dan fee snapshot per item.
-  check("R3", "18 unit valid dan 13/13 item punya snapshot fee", {
+  check("R3", "21 unit valid dan 16/16 item punya snapshot fee", {
     units: snapshot.summary.units,
     itemsWithFee: validRawItems.filter((item) => n(item.seller_fee) > 0).length,
     totalItems: validRawItems.length,
-  }, { units: 18, itemsWithFee: 13, totalItems: 13 });
+  }, { units: 21, itemsWithFee: 16, totalItems: 16 });
 
   // R4 — Fee snapshot item sama dengan fee snapshot order (backfill selesai).
   const orderFeeTotal = rawOrders
     .filter((order) => validIds.has(order.id))
     .reduce((sum, order) => sum + (n(order.seller_fee) || n(order.product_fee) || n(order.platform_revenue)), 0);
   const itemFeeTotal = validRawItems.reduce((sum, item) => sum + n(item.seller_fee), 0);
-  check("R4", "Fee item = fee order = Rp2.085.740 (bukan Rp279.880 / Rp2.533.698)", {
+  check("R4", "Fee item = fee order = Rp3.135.690 (bukan Rp279.880 / Rp2.533.698)", {
     itemFeeTotal,
     orderFeeTotal,
     reported: snapshot.summary.fee,
-  }, { itemFeeTotal: 2085740, orderFeeTotal: 2085740, reported: 2085740 });
+  }, { itemFeeTotal: 3135690, orderFeeTotal: 3135690, reported: 3135690 });
 
   // R5 — Pendapatan bersih = kotor − fee.
-  check("R5", "Pendapatan bersih = Rp198.096.260", {
+  check("R5", "Pendapatan bersih = Rp239.044.310", {
     net: snapshot.summary.net,
     computed: snapshot.summary.gross - snapshot.summary.fee,
-  }, { net: 198096260, computed: 198096260 });
+  }, { net: 239044310, computed: 239044310 });
 
   // R6 — Settled + escrow = bersih.
-  check("R6", "Selesai Rp83.351.042 + Escrow Rp114.745.218 = bersih", {
+  check("R6", "Selesai Rp83.351.042 + Escrow Rp155.693.268 = bersih", {
     settled: snapshot.summary.settledNet,
     escrow: snapshot.summary.escrow,
     total: snapshot.summary.settledNet + snapshot.summary.escrow,
-  }, { settled: 83351042, escrow: 114745218, total: 198096260 });
+  }, { settled: 83351042, escrow: 155693268, total: 239044310 });
 
   // R7 — GMV = subtotal + ongkir + asuransi + packing; ongkir terpisah.
-  check("R7", "GMV Rp200.584.000 = kotor + ongkir Rp329.000 + asuransi Rp65.000 + packing Rp8.000", {
+  check("R7", "GMV Rp242.645.500 = kotor + ongkir Rp374.000 + asuransi Rp80.000 + packing Rp11.500", {
     gmv: snapshot.summary.gmv,
     shipping: snapshot.summary.shipping,
     insurance: snapshot.summary.insurance,
     packing: snapshot.summary.packing,
     recomputed: snapshot.summary.gross + snapshot.summary.shipping + snapshot.summary.insurance + snapshot.summary.packing,
-  }, { gmv: 200584000, shipping: 329000, insurance: 65000, packing: 8000, recomputed: 200584000 });
+  }, { gmv: 242645500, shipping: 374000, insurance: 80000, packing: 11500, recomputed: 242645500 });
 
   // R8 — Buku besar fee = held + settled = fee platform.
   const held = rawLedger.filter((row) => row.type === "seller_fee" && row.status === "held").reduce((sum, row) => sum + n(row.amount), 0);
   const settled = rawLedger.filter((row) => row.type === "seller_fee" && row.status === "settled").reduce((sum, row) => sum + n(row.amount), 0);
-  check("R8", "Ledger held Rp1.441.782 + settled Rp643.958 = fee Rp2.085.740", {
+  check("R8", "Ledger held Rp2.491.732 + settled Rp643.958 = fee Rp3.135.690", {
     held,
     settled,
     ledgerFee: snapshot.ledgerFee,
     platformRevenue: admin.summary.platformRevenue,
-  }, { held: 1441782, settled: 643958, ledgerFee: 2085740, platformRevenue: 2085740 });
+  }, { held: 2491732, settled: 643958, ledgerFee: 3135690, platformRevenue: 3135690 });
 
   // R9 — Tidak ada fee untuk pesanan batal di buku besar.
   const cancelledFeeLedger = rawLedger.filter((row) => row.type === "seller_fee" && row.status === "cancelled");
@@ -119,12 +119,12 @@ async function main() {
   // R10 — Pesanan DEMO dihapus dan stok dikembalikan.
   const demoOrders = rawOrders.filter((order) => String(order.order_number || "").startsWith("DEMO-"));
   const stockByName = (name) => n(products.find((product) => product.name === name)?.stock);
-  check("R10", "Tidak ada DEMO-*; stok Samsung 22, PS5 18, Xiaomi 21", {
+  check("R10", "Tidak ada DEMO-*; stok Samsung 21, PS5 18, Xiaomi 20", {
     demoOrders: demoOrders.length,
     samsung: stockByName("Samsung Galaxy S24 Ultra 12/512GB"),
     ps5: stockByName("PlayStation 5 Slim 1TB + 2 Controller"),
     xiaomi: stockByName("Xiaomi 14T Pro 12/512GB HyperOS"),
-  }, { demoOrders: 0, samsung: 22, ps5: 18, xiaomi: 21 });
+  }, { demoOrders: 0, samsung: 21, ps5: 18, xiaomi: 20 });
 
   // R11 — Deficit seller = ditarik − saldo selesai.
   check("R11", "Saldo minus Rp15.637.189 = ditarik Rp98.988.231 − selesai Rp83.351.042", {
@@ -161,10 +161,10 @@ async function main() {
   // R14 — Metode pembayaran ternormalisasi, hanya pesanan valid.
   const badMethods = adminDash.paymentMethods.filter((row) => !row.name || /^(null|undefined|Lainnya)$/i.test(row.name));
   const methodCount = adminDash.paymentMethods.reduce((sum, row) => sum + n(row.count), 0);
-  check("R14", "Metode pembayaran ternormalisasi; total = 13 pesanan valid", {
+  check("R14", "Metode pembayaran ternormalisasi; total = 16 pesanan valid", {
     badMethods: badMethods.length,
     methodCount,
-  }, { badMethods: 0, methodCount: 13 });
+  }, { badMethods: 0, methodCount: 16 });
 
   // R15 — Status dan nama produk ternormalisasi pada transaksi.
   const allowedStatuses = ["Dibayar", "Dikirim", "Selesai"];
@@ -174,7 +174,7 @@ async function main() {
     badStatuses: badStatuses.length,
     badNames: badNames.length,
     transactions: snapshot.transactions.length,
-  }, { badStatuses: 0, badNames: 0, transactions: 13 });
+  }, { badStatuses: 0, badNames: 0, transactions: 16 });
 
   // R16 — Satu sumber metrik: dashboard admin = finance admin.
   check("R16", "Dashboard dan finance admin memakai angka yang sama", {

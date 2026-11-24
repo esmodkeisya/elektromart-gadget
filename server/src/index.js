@@ -1136,7 +1136,22 @@ app.get("/api/products", optionalUser, async (req, res) => {
   if (req.profile?.role === "seller" && req.query.catalog !== "1") where.seller_id = req.user.id;
   if (req.query.sellerId) where.seller_id = String(req.query.sellerId);
   const products = await prisma.product.findMany({ where, orderBy: { created_at: "desc" } });
-  res.json({ products: products.map(mapProduct) });
+  let soldByProduct = new Map();
+  let soldByName = new Map();
+  try {
+    // Satu sumber kebenaran: unit terjual dihitung dari pesanan valid (batal tidak masuk).
+    const snapshot = await finance.buildPlatformFinance();
+    soldByProduct = new Map(snapshot.topProducts.map((row) => [row.id, row.units_sold]));
+    soldByName = new Map(snapshot.topProducts.map((row) => [row.name, row.units_sold]));
+  } catch {
+    /* Jika agregat gagal, produk tetap tampil dengan sold = 0. */
+  }
+  res.json({
+    products: products.map((row) => ({
+      ...mapProduct(row),
+      sold: soldByProduct.get(row.id) ?? soldByName.get(row.name) ?? 0,
+    })),
+  });
 });
 
 app.post("/api/products", requireUser, requireRole("seller", "admin"), async (req, res) => {

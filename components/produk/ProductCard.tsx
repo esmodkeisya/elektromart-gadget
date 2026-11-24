@@ -77,7 +77,14 @@ export function FlashSaleCard({ product }: { product: Product }) {
   );
 }
 
-export function BestSellerCard({ product }: { product: Product }) {
+export function BestSellerCard({
+  product,
+  imageContain = false,
+}: {
+  product: Product;
+  /** Khusus halaman toko: foto tampil utuh di kotak abu muda dengan ruang kosong. */
+  imageContain?: boolean;
+}) {
   const { t } = useLanguage();
   const live = useLiveProducts();
   const item = applyLiveProduct(product, live);
@@ -86,13 +93,13 @@ export function BestSellerCard({ product }: { product: Product }) {
       href={`/produk/${item.id}`}
       className="block overflow-hidden rounded-xl border border-slate-100 bg-white shadow-card transition hover:shadow-cardHover"
     >
-      <div className="relative aspect-square w-full">
+      <div className={`relative aspect-square w-full ${imageContain ? "bg-slate-50" : ""}`}>
         <ProductImage
           src={item.image}
           alt={item.name}
           fill
           sizes="(max-width: 768px) 50vw, 16vw"
-          className="object-cover"
+          className={imageContain ? "object-contain p-4" : "object-cover"}
         />
         {item.discountPercent && (
           <span className="absolute left-2 top-2 rounded bg-red-600 px-1.5 py-0.5 text-xs font-bold text-white">

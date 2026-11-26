@@ -354,7 +354,7 @@ export default function TrackOrderPage() {
                   <p>{t("track.waitingPaymentNotice")}</p>
                 </div>
                 <Link
-                  href="/profil"
+                  href={`/pembayaran?order=${encodeURIComponent(order.id)}`}
                   className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
                 >
                   <CheckCircle2 className="h-4 w-4" /> {t("track.payNow")}

@@ -19,6 +19,7 @@ type StoreRecord = {
   store_name?: string | null;
   store_address?: string | null;
   avatar_url?: string | null;
+  store_banner_url?: string | null;
   email?: string | null;
   seller_status?: string | null;
   rating?: number;
@@ -29,6 +30,14 @@ type StoreRecord = {
   product_count?: number;
   active_product_count?: number;
 };
+
+/** URL upload dari API bisa absolut (localhost:4000); samakan ke path relatif agar proxy Next.js dipakai. */
+function normalizeMediaUrl(value?: string | null) {
+  if (!value) return null;
+  const marker = "/uploads/";
+  const index = value.indexOf(marker);
+  return index >= 0 ? value.slice(index) : value;
+}
 
 function formatDate(value?: string | null) {
   if (!value) return "-";
@@ -50,6 +59,7 @@ export default function StorePage() {
   const liveProducts = useLiveProducts();
   const [store, setStore] = useState<StoreRecord | null>(null);
   const [reviews, setReviews] = useState<ReviewRecord[]>([]);
+  const [bannerFailed, setBannerFailed] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -74,6 +84,10 @@ export default function StorePage() {
       active = false;
     };
   }, [storeSlug]);
+
+  useEffect(() => {
+    setBannerFailed(false);
+  }, [store?.store_banner_url]);
 
   useEffect(() => {
     if (!store?.id) {
@@ -127,7 +141,16 @@ export default function StorePage() {
 
         {/* Header Toko */}
         <div className="mt-4 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-card">
-          <div className="h-32 bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500" />
+          {store?.store_banner_url && !bannerFailed ? (
+            <img
+              src={normalizeMediaUrl(store.store_banner_url) || undefined}
+              alt={`Banner ${storeName}`}
+              onError={() => setBannerFailed(true)}
+              className="h-32 w-full object-cover sm:h-44"
+            />
+          ) : (
+            <div className="h-32 bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500 sm:h-44" />
+          )}
           <div className="px-6 pb-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div className="flex min-w-0 items-end gap-4">

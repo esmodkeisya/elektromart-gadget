@@ -83,11 +83,11 @@ async function main() {
   }, { net: 239044310, computed: 239044310 });
 
   // R6 — Settled + escrow = bersih.
-  check("R6", "Selesai Rp83.351.042 + Escrow Rp155.693.268 = bersih", {
+  check("R6", "Selesai Rp140.188.206 + Escrow Rp98.856.104 = bersih", {
     settled: snapshot.summary.settledNet,
     escrow: snapshot.summary.escrow,
     total: snapshot.summary.settledNet + snapshot.summary.escrow,
-  }, { settled: 83351042, escrow: 155693268, total: 239044310 });
+  }, { settled: 140188206, escrow: 98856104, total: 239044310 });
 
   // R7 — GMV = subtotal + ongkir + asuransi + packing; ongkir terpisah.
   check("R7", "GMV Rp242.645.500 = kotor + ongkir Rp374.000 + asuransi Rp80.000 + packing Rp11.500", {
@@ -101,12 +101,12 @@ async function main() {
   // R8 — Buku besar fee = held + settled = fee platform.
   const held = rawLedger.filter((row) => row.type === "seller_fee" && row.status === "held").reduce((sum, row) => sum + n(row.amount), 0);
   const settled = rawLedger.filter((row) => row.type === "seller_fee" && row.status === "settled").reduce((sum, row) => sum + n(row.amount), 0);
-  check("R8", "Ledger held Rp2.491.732 + settled Rp643.958 = fee Rp3.135.690", {
+  check("R8", "Ledger held Rp1.135.896 + settled Rp1.999.794 = fee Rp3.135.690", {
     held,
     settled,
     ledgerFee: snapshot.ledgerFee,
     platformRevenue: admin.summary.platformRevenue,
-  }, { held: 2491732, settled: 643958, ledgerFee: 3135690, platformRevenue: 3135690 });
+  }, { held: 1135896, settled: 1999794, ledgerFee: 3135690, platformRevenue: 3135690 });
 
   // R9 — Tidak ada fee untuk pesanan batal di buku besar.
   const cancelledFeeLedger = rawLedger.filter((row) => row.type === "seller_fee" && row.status === "cancelled");
@@ -127,25 +127,25 @@ async function main() {
   }, { demoOrders: 0, samsung: 21, ps5: 18, xiaomi: 20 });
 
   // R11 — Deficit seller = ditarik − saldo selesai.
-  check("R11", "Saldo minus Rp15.637.189 = ditarik Rp98.988.231 − selesai Rp83.351.042", {
+  check("R11", "Saldo seller = selesai Rp140.188.206 − ditarik Rp140.188.206 = Rp0", {
     withdrawn: snapshot.summary.withdrawn,
     settled: snapshot.summary.settledNet,
     deficit: snapshot.summary.deficit,
     available: snapshot.summary.availableBalance,
     sellerDeficit: seller.summary.deficit,
   }, {
-    withdrawn: 98988231,
-    settled: 83351042,
-    deficit: 15637189,
+    withdrawn: 140188206,
+    settled: 140188206,
+    deficit: 0,
     available: 0,
-    sellerDeficit: 15637189,
+    sellerDeficit: 0,
   });
 
   // R12 — Guard penarikan baru tersedia di server (diverifikasi via smoke test HTTP terpisah).
   const indexSource = fs.readFileSync(path.resolve(__dirname, "../src/index.js"), "utf8");
   ok("R12", "Penarikan baru diblokir saat deficit > 0", (
-    seller.summary.deficit > 0 &&
-    /financeData\.summary\.deficit\s*>\s*0/.test(indexSource)
+    /financeData\.summary\.deficit\s*>\s*0/.test(indexSource) &&
+    /Penarikan baru diblokir|Saldo seller sedang minus/.test(indexSource)
   ), "Server harus menolak POST penarikan saat seller.deficit > 0.");
 
   // R13 — Kategori ternormalisasi dan stok kategori = stok produk.

@@ -16,6 +16,21 @@ const FUND_STATUS_LABELS = {
   completed: "Dapat Ditarik",
   cancelled: "Dibatalkan",
 };
+// Dipakai hanya jika kategori tidak memiliki warna di master /api/categories.
+const FALLBACK_CATEGORY_COLORS = {
+  Smartphone: "#3B82F6",
+  Laptop: "#8B5CF6",
+  "TV & Audio": "#EC4899",
+  Kamera: "#F59E0B",
+  Audio: "#10B981",
+  Gaming: "#F43F5E",
+  "Smart Watch": "#06B6D4",
+  "Kabel & Charger": "#7C3AED",
+  Aksesoris: "#F59863",
+};
+function validHexColor(value) {
+  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(String(value || "")) ? String(value) : null;
+}
 const SELLER_FEE_MIN = 0.02;
 const SELLER_FEE_MAX = 0.05;
 
@@ -395,19 +410,37 @@ async function buildPlatformFinance() {
 
   // Kategori: gabungkan master kategori dan kategori produk yang sudah dinormalisasi.
   const categoryMap = new Map();
+  const addCategory = (key, name, color) => {
+    if (categoryMap.has(key)) return;
+    categoryMap.set(key, {
+      name,
+      color: validHexColor(color) || FALLBACK_CATEGORY_COLORS[name] || "#94a3b8",
+      products: 0,
+      stock: 0,
+      units: 0,
+      revenue: 0,
+      orders: new Set(),
+    });
+  };
+  // Nama persis (case-insensitive) terlebih dahulu agar "Audio" tidak memakai
+  // warna "TV & Audio" dan "aksesoris" tidak terpisah dari "Aksesoris".
+  const exactNames = new Set(categories.map((category) => category.name.toLowerCase()));
+  for (const category of categories) addCategory(category.name.toLowerCase(), category.name, category.color);
   for (const category of categories) {
     const name = normalizeCategory(category.name);
-    if (!categoryMap.has(name)) categoryMap.set(name, { name, products: 0, stock: 0, units: 0, revenue: 0, orders: new Set() });
+    if (exactNames.has(name.toLowerCase())) continue;
+    addCategory(name.toLowerCase(), name, category.color);
   }
   for (const product of products) {
     const name = normalizeCategory(product.category);
-    if (!categoryMap.has(name)) categoryMap.set(name, { name, products: 0, stock: 0, units: 0, revenue: 0, orders: new Set() });
-    const row = categoryMap.get(name);
+    const key = name.toLowerCase();
+    addCategory(key, name, FALLBACK_CATEGORY_COLORS[name]);
+    const row = categoryMap.get(key);
     row.products += 1;
     row.stock += n(product.stock);
   }
   for (const row of validTransactions) {
-    const categoryRow = categoryMap.get(row.category);
+    const categoryRow = categoryMap.get(row.category.toLowerCase());
     if (!categoryRow) continue;
     categoryRow.units += n(row.qty);
     categoryRow.revenue += n(row.gross);
@@ -416,6 +449,7 @@ async function buildPlatformFinance() {
   const categoriesResult = [...categoryMap.values()]
     .map((row) => ({
       name: row.name,
+      color: row.color,
       product_count: row.products,
       stock_total: row.stock,
       units_sold: row.units,

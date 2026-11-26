@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Pencil, Star, Store, Trash2 } from "lucide-react";
+import { Pencil, Star, Trash2 } from "lucide-react";
 import TopBar from "../components/TopBar";
+import AdminAvatar from "../components/AdminAvatar";
 import { useLanguage } from "@/lib/i18n";
 import { api, type UserProfile } from "@/lib/api";
 
@@ -163,9 +164,7 @@ export default function AdminSeller() {
                 <tr key={s.id} className="border-t border-[#F1F4F8]">
                   <td className="py-4">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg bg-[#F4F6FA]">
-                        <Store size={18} />
-                      </div>
+                      <AdminAvatar src={s.avatar_url} alt={s.store_name || s.full_name || s.email || ""} className="h-11 w-11 shrink-0" />
                       <div>
                         <p className="font-semibold text-admin-ink">{s.store_name || s.full_name}</p>
                         <p className="text-xs text-admin-muted">{s.email}</p>

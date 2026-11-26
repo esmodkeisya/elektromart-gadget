@@ -725,12 +725,52 @@ async function ensureDefaultCategories() {
     for (const category of DEFAULT_CATEGORIES) {
       await prisma.category.upsert({
         where: { slug: category.slug },
-        update: category,
+        // Jangan timpa warna/nama yang sudah diubah lewat manajemen kategori.
+        update: {},
         create: category,
       });
     }
   } catch (err) {
     console.warn("Gagal sinkron kategori default:", err.message);
+  }
+}
+
+// Order item lama bisa memiliki seller_id null. Isi dari katalog produk agar
+// daftar pesanan seller dan buyer memakai atribusi penjual yang sama.
+// Status, jumlah, fee, dan stok tidak diubah.
+async function backfillOrderItemSellers() {
+  try {
+    const pending = await prisma.orderItem.findMany({
+      where: { seller_id: null },
+      select: { id: true, product_id: true, product_name: true },
+    });
+    if (!pending.length) return;
+    const products = await prisma.product.findMany({ select: { id: true, name: true, seller_id: true } });
+    const normalize = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+    const byId = new Map(products.map((product) => [product.id, product]));
+    const byName = new Map();
+    for (const product of products) {
+      const key = normalize(product.name);
+      if (key && !byName.has(key)) byName.set(key, product);
+    }
+
+    let updated = 0;
+    for (const item of pending) {
+      const key = normalize(item.product_name);
+      const product =
+        (item.product_id && byId.get(item.product_id)) ||
+        byName.get(key) ||
+        products.find((row) => {
+          const name = normalize(row.name);
+          return Boolean(key && name && (name.includes(key) || key.includes(name)));
+        });
+      if (!product?.seller_id) continue;
+      await prisma.orderItem.update({ where: { id: item.id }, data: { seller_id: product.seller_id } });
+      updated += 1;
+    }
+    if (updated) console.log(`Seller order item diselaraskan: ${updated}`);
+  } catch (err) {
+    console.warn("Gagal menyelaraskan seller order item:", err.message);
   }
 }
 
@@ -2863,4 +2903,5 @@ app.use((err, _req, res, _next) => {
 app.listen(port, () => {
   console.log(`ElektroMart API berjalan di http://localhost:${port}`);
   void ensureDefaultCategories();
+  void backfillOrderItemSellers();
 });

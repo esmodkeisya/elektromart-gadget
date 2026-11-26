@@ -869,6 +869,7 @@ export default function Finance() {
                         </td>
                         <td className="px-4">
                           <span
+                            title={t("adminFinance.fundStatusHint")}
                             className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${
                               settled ? "bg-[#E9F8EF] text-[#15803D]" : "bg-[#FFF4E5] text-[#C2410C]"
                             }`}

@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import TopBar from "../components/TopBar";
+import AdminAvatar from "../components/AdminAvatar";
 import { useLanguage } from "@/lib/i18n";
 import { api, type UserProfile } from "@/lib/api";
 
@@ -133,8 +134,13 @@ export default function AdminBuyer() {
                 {buyers.map((b) => (
                   <tr key={b.id} className="border-t border-[#F1F4F8]">
                     <td className="px-4 py-4">
-                      <p className="font-semibold text-admin-ink">{b.full_name}</p>
-                      <p className="text-xs text-admin-muted">{b.email}</p>
+                      <div className="flex items-center gap-3">
+                        <AdminAvatar src={b.avatar_url} alt={b.full_name || b.email || ""} className="h-10 w-10 shrink-0" />
+                        <div>
+                          <p className="font-semibold text-admin-ink">{b.full_name}</p>
+                          <p className="text-xs text-admin-muted">{b.email}</p>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 text-admin-ink">{b.phone}</td>
                     <td className="px-4 text-admin-ink">{b.created_at ? new Date(b.created_at).toLocaleDateString() : "-"}</td>

@@ -107,6 +107,25 @@ function fromDeg(deg: number) {
   return Math.round(deg * 10) / 10;
 }
 
+const CATEGORY_FALLBACK_COLORS: Record<string, string> = {
+  Smartphone: "#3B82F6",
+  Laptop: "#8B5CF6",
+  "TV & Audio": "#EC4899",
+  Kamera: "#F59E0B",
+  Audio: "#10B981",
+  Gaming: "#F43F5E",
+  "Smart Watch": "#06B6D4",
+  "Kabel & Charger": "#7C3AED",
+  Aksesoris: "#F59863",
+};
+
+function categoryColor(name: string, color?: string | null) {
+  const value = String(color || "").trim();
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)
+    ? value
+    : CATEGORY_FALLBACK_COLORS[name] || "#94a3b8";
+}
+
 export default function DashboardPage() {
   const { t } = useLanguage();
   const [stats, setStats] = useState({ sellers: 0, activeSellers: 0, buyers: 0, products: 0, categories: 0 });
@@ -162,7 +181,7 @@ export default function DashboardPage() {
           label: category.name,
           value: category.units_sold || 0,
           stock: category.stock_total || 0,
-          color: category.color || "#94a3b8",
+          color: categoryColor(category.name, category.color),
         }));
         setCategorySales(categorySales);
         setPopularProducts(data.products || []);

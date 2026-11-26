@@ -1082,6 +1082,7 @@ export default function AdminKeuangan() {
                 {data.transactions.length}
               </span>
             </div>
+            <p className="-mt-2 mb-4 text-xs leading-relaxed text-admin-muted">{t("adminFinance.fundStatusHint")}</p>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
@@ -1092,7 +1093,7 @@ export default function AdminKeuangan() {
                     <th className="pb-3 font-semibold">{t("adminFinance.platformFee")}</th>
                     <th className="pb-3 font-semibold">{t("sellerFinance.net")}</th>
                     <th className="pb-3 font-semibold">{t("sellerFinance.orderStatus")}</th>
-                    <th className="pb-3 font-semibold">{t("adminFinance.fundStatus")}</th>
+                    <th className="pb-3 font-semibold" title={t("adminFinance.fundStatusHint")}>{t("adminFinance.fundStatus")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1120,7 +1121,7 @@ export default function AdminKeuangan() {
                           </span>
                         </td>
                         <td className="py-4">
-                          <span className="whitespace-nowrap rounded-full bg-[#EEF1F6] px-3 py-1 text-xs font-semibold text-admin-muted">
+                          <span title={t("adminFinance.fundStatusHint")} className="whitespace-nowrap rounded-full bg-[#EEF1F6] px-3 py-1 text-xs font-semibold text-admin-muted">
                             {fundLabel}
                           </span>
                         </td>

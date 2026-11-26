@@ -1009,6 +1009,7 @@ export default function BuyerProfilPage() {
                 <div className="space-y-4">
                   <h2 className="text-base font-bold text-navy-900">{t("profile.myOrders")}</h2>
                   <p className="-mt-2 text-xs text-slate-500">{t("profile.ordersSubtitle")}</p>
+                  <p className="-mt-2 text-xs text-slate-500">{t("profile.ordersScopeHint")}</p>
 
                   <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-100">
                     {orderTabs.map((tabItem) => {

@@ -20,11 +20,12 @@ import { formatRupiah } from "@/lib/data";
 import ProductThumb from "@/components/ProductThumb";
 import TopBar from "../components/TopBar";
 
-type TabId = "all" | "need_ship" | "shipped" | "done" | "cancelled";
+type TabId = "all" | "unpaid" | "need_ship" | "shipped" | "done" | "cancelled";
 
 const TAB_STATUS: Record<TabId, string[]> = {
   all: [],
-  need_ship: ["waiting_payment", "paid"],
+  unpaid: ["waiting_payment"],
+  need_ship: ["paid"],
   shipped: ["shipped"],
   done: ["completed"],
   cancelled: ["cancelled"],
@@ -32,6 +33,7 @@ const TAB_STATUS: Record<TabId, string[]> = {
 
 const TAB_LABEL: Record<TabId, string> = {
   all: "seller.allOrders",
+  unpaid: "seller.orderWaitingPayment",
   need_ship: "seller.needShipment",
   shipped: "seller.shipped",
   done: "admin.done",
@@ -343,7 +345,7 @@ export default function Orders() {
   }, [activeTab, query, courierFilter, sortNewest]);
 
   const counts = useMemo(() => {
-    const c: Record<TabId, number> = { all: 0, need_ship: 0, shipped: 0, done: 0, cancelled: 0 };
+    const c: Record<TabId, number> = { all: 0, unpaid: 0, need_ship: 0, shipped: 0, done: 0, cancelled: 0 };
     (orders || []).forEach((o) => {
       c.all += 1;
       (Object.keys(TAB_STATUS) as TabId[]).forEach((tab) => {
@@ -430,6 +432,7 @@ export default function Orders() {
         <div className="mb-6">
           <h1 className="text-[28px] font-bold tracking-tight text-seller-ink">{t("seller.orderManagement")}</h1>
           <p className="mt-1 text-sm text-seller-muted">{t("seller.orderManagementSubtitle")}</p>
+          <p className="mt-1 text-xs text-seller-muted">{t("seller.ordersScopeHint")}</p>
         </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-card">

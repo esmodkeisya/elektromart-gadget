@@ -29,9 +29,9 @@ export default function TopBar({ breadcrumb }: TopBarProps) {
   }, []);
 
   return (
-    <header className="flex items-center justify-end gap-4 border-b border-[#EEF1F6] bg-white px-8 py-4">
-      {breadcrumb && <p className="mr-auto text-sm font-medium text-admin-muted">{breadcrumb}</p>}
-      <div className="flex shrink-0 items-center gap-4 text-admin-ink">
+    <header className="flex items-center justify-end gap-2 border-b border-[#EEF1F6] bg-white px-4 py-3 sm:gap-4 sm:px-6 sm:py-4 lg:px-8">
+      {breadcrumb && <p className="mr-auto min-w-0 flex-1 truncate text-xs font-medium text-admin-muted sm:text-sm">{breadcrumb}</p>}
+      <div className="flex shrink-0 items-center gap-2 text-admin-ink sm:gap-4">
         <LanguageSwitcher variant="light" />
         <AdminNotificationBell />
         <button type="button" aria-label={t("admin.settings")} onClick={() => router.push("/admin/pengaturan")}>

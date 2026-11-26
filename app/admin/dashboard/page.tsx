@@ -21,6 +21,8 @@ import {
   Flag,
   Loader2,
   Download,
+  Menu,
+  X,
 } from "lucide-react";
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
@@ -29,7 +31,7 @@ import { buildWorkbook, downloadWorkbook, excelDate, reportDate, reportDateTime 
 import type { CellValue, ReportMeta, SummaryLine, SummarySpec, TableSpec } from "@/lib/report";
 import { formatRupiah } from "@/lib/data";
 
-type CategorySlice = { label: string; value: number; stock: number; color: string };
+type CategorySlice = { label: string; value: number; stock: number; products: number; color: string };
 type PopularProduct = { name: string; stock: number; category?: string | null };
 type TopSeller = { name: string; products: number };
 type OrderStats = {
@@ -86,7 +88,7 @@ function PieChart({ segments }: { segments: CategorySlice[] }) {
   );
   const displayTotal = segments.reduce((sum, item) => sum + item.value, 0);
   return (
-    <div className="relative mx-auto aspect-square w-52 sm:w-60">
+    <div className="relative mx-auto aspect-square w-44 shrink-0 sm:w-52 lg:w-56">
       <div
         className="h-full w-full rounded-full"
         style={{
@@ -105,6 +107,15 @@ function PieChart({ segments }: { segments: CategorySlice[] }) {
 
 function fromDeg(deg: number) {
   return Math.round(deg * 10) / 10;
+}
+
+function formatShare(value: number, total: number) {
+  if (!total || !value) return "0%";
+  return `${Number(((value / total) * 100).toFixed(1))}%`;
+}
+
+function shareWidth(value: number, total: number) {
+  return total && value ? Number((((value / total) * 100).toFixed(1))) : 0;
 }
 
 const CATEGORY_FALLBACK_COLORS: Record<string, string> = {
@@ -154,6 +165,7 @@ export default function DashboardPage() {
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [busyReportId, setBusyReportId] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -177,12 +189,18 @@ export default function DashboardPage() {
     }>("/api/dashboard/admin")
       .then((data) => {
         setStats(data.stats);
-        const categorySales = (data.categories || []).map((category) => ({
-          label: category.name,
-          value: category.units_sold || 0,
-          stock: category.stock_total || 0,
-          color: categoryColor(category.name, category.color),
-        }));
+        const categorySales = (data.categories || []).map((category) => {
+          const value = category.units_sold || 0;
+          const products = category.product_count || 0;
+          return {
+            label: category.name,
+            value,
+            products,
+            // Kategori tanpa produk (atau tanpa penjualan) tidak menampilkan stok.
+            stock: products > 0 && value > 0 ? category.stock_total || 0 : 0,
+            color: categoryColor(category.name, category.color),
+          };
+        });
         setCategorySales(categorySales);
         setPopularProducts(data.products || []);
         setTopSellers(data.sellers || []);
@@ -545,12 +563,35 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 font-sans text-slate-800">
+    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-800 lg:h-screen lg:overflow-hidden">
+      {sidebarOpen ? (
+        <button
+          type="button"
+          aria-label={t("admin.closeMenu")}
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-navy-900/50 lg:hidden"
+        />
+      ) : null}
+
       {/* Sidebar */}
-      <aside className="flex w-64 flex-shrink-0 flex-col bg-[#0a1633] px-4 py-6">
-        <div className="mb-10 px-2">
-          <h1 className="text-lg font-bold text-white">ElektroMart</h1>
-          <p className="mt-1 text-xs text-slate-400">{t("admin.adminDashboard")}</p>
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col overflow-y-auto bg-[#0a1633] px-4 py-6 transition-transform duration-200 lg:static lg:translate-x-0 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="mb-8 flex items-start justify-between px-2 lg:mb-10">
+          <div>
+            <h1 className="text-lg font-bold text-white">ElektroMart</h1>
+            <p className="mt-1 text-xs text-slate-400">{t("admin.adminDashboard")}</p>
+          </div>
+          <button
+            type="button"
+            aria-label={t("admin.closeMenu")}
+            onClick={() => setSidebarOpen(false)}
+            className="rounded-lg p-1.5 text-slate-300 hover:bg-white/10 lg:hidden"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
         <nav className="flex-1 space-y-1">
           {navItems.map((item) => {
@@ -559,13 +600,14 @@ export default function DashboardPage() {
               <Link
                 key={item.label}
                 href={item.href}
+                onClick={() => setSidebarOpen(false)}
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
                   active
                     ? "bg-amber-800 text-white"
                     : "text-slate-300 hover:bg-white/5"
                 }`}
               >
-                <item.icon className="h-4 w-4" />
+                <item.icon className="h-4 w-4 shrink-0" />
                 <span>{item.label}</span>
               </Link>
             );
@@ -573,6 +615,7 @@ export default function DashboardPage() {
         </nav>
         <Link
           href="/beranda"
+          onClick={() => setSidebarOpen(false)}
           className="mt-6 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-400 hover:bg-white/5"
         >
           <Home className="h-4 w-4" /> {t("admin.backHome")}
@@ -580,22 +623,34 @@ export default function DashboardPage() {
       </aside>
 
       {/* Main */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-w-0 flex-1 lg:overflow-y-auto">
+        <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
+          <button
+            type="button"
+            aria-label={t("admin.openMenu")}
+            onClick={() => setSidebarOpen(true)}
+            className="rounded-lg border border-slate-200 p-2 text-navy-900"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <span className="font-bold text-navy-900">ElektroMart</span>
+          <span className="ml-auto text-xs font-semibold text-slate-400">{t("admin.adminDashboard")}</span>
+        </div>
         <TopBar />
-        <main className="px-8 py-8">
+        <main className="px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
           {/* Header */}
-          <div className="flex items-end justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-[#0a1633]">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
+              <h1 className="text-xl font-bold text-[#0a1633] sm:text-2xl">
                 {t("admin.dashboardAdmin")}
               </h1>
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="mt-1 text-xs text-slate-500 sm:text-sm">
                 {t("admin.summaryPer")}{" "}
                 <TodayDate />
               </p>
             </div>
-            <div className="flex flex-col items-end gap-2">
-              <div className="flex gap-2">
+            <div className="flex w-full flex-col items-start gap-2 sm:w-auto sm:items-end">
+              <div className="flex flex-wrap gap-2">
                 <span className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-600">
                   <Activity className="mr-1 inline h-3.5 w-3.5" />
                   {t("admin.systemActive")}
@@ -609,7 +664,7 @@ export default function DashboardPage() {
                 onClick={() => void handleDownload()}
                 disabled={downloading}
                 title={t("admin.downloadTechnicalReport")}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:justify-start"
               >
                 {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4 text-slate-400" />}
                 {t("admin.downloadTechnicalReport")}
@@ -684,8 +739,8 @@ export default function DashboardPage() {
           {/* ====== PIE CHART + RINGKASAN ====== */}
           <div className="mt-6 grid gap-5 lg:grid-cols-[1.3fr_1fr]">
             {/* Pie Chart Card */}
-            <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
-              <div className="mb-6 flex items-start justify-between">
+            <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-card sm:p-6">
+              <div className="mb-5 flex items-start justify-between sm:mb-6">
                 <div>
                   <h3 className="font-semibold text-[#0a1633]">
                     {t("admin.distributionPerCategory")}
@@ -699,34 +754,36 @@ export default function DashboardPage() {
               <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
                 {categorySales.length ? <PieChart segments={categorySales} /> : <p className="text-sm text-slate-500">{t("admin.noCategoryData")}</p>}
 
-                <div className="flex-1 space-y-3">
+                <div className="min-w-0 flex-1 space-y-3">
                   {categorySales.map((seg) => {
-                    const totalCat = categorySales.reduce((sum, item) => sum + item.value, 0) || 1;
-                    const pct = ((seg.value / totalCat) * 100).toFixed(1);
+                    const totalCat = categorySales.reduce((sum, item) => sum + item.value, 0);
                     return (
-                      <div key={seg.label}>
-                        <div className="mb-1 flex items-center justify-between text-xs">
-                          <span className="flex items-center gap-2 font-medium text-[#0a1633]">
+                      <div key={seg.label} className="min-w-0">
+                        <div className="mb-1 flex items-start justify-between gap-2 text-xs">
+                          <span className="flex min-w-0 items-center gap-2">
                             <span
-                              className="inline-block h-2.5 w-2.5 rounded-full"
+                              className="inline-block h-4 w-4 shrink-0 rounded-md border border-black/10 shadow-sm"
                               style={{ backgroundColor: seg.color }}
                             />
-                            {seg.label}
+                            <span className="min-w-0">
+                              <span className="block truncate font-medium text-[#0a1633]">{seg.label}</span>
+                              <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{seg.color}</span>
+                            </span>
                           </span>
-                          <span className="font-semibold text-[#0a1633]">{seg.value.toLocaleString("id-ID")}</span>
+                          <span className="shrink-0 font-semibold text-[#0a1633]">{seg.value.toLocaleString("id-ID")}</span>
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                           <div
                             className="h-full rounded-full"
                             style={{
-                              width: `${pct}%`,
+                              width: `${shareWidth(seg.value, totalCat)}%`,
                               backgroundColor: seg.color,
                             }}
                           />
                         </div>
-                        <span className="mt-0.5 flex items-center justify-between text-[10px] text-slate-400">
+                        <span className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-slate-400">
                           <span>{seg.stock.toLocaleString("id-ID")} {t("admin.unitLeft")}</span>
-                          <span>{pct}%</span>
+                          <span>{formatShare(seg.value, totalCat)}</span>
                         </span>
                       </div>
                     );
@@ -738,7 +795,7 @@ export default function DashboardPage() {
             {/* Ringkasan Keuangan & Metode Pembayaran */}
             <div className="space-y-5">
               {/* Keuangan */}
-              <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+              <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-card sm:p-5">
                 <h3 className="font-semibold text-[#0a1633]">{t("admin.financeSummary")}</h3>
                 <div className="mt-4 space-y-3">
                   <FinanceRow label={t("admin.totalRevenue")} value={formatRupiah(orders.totalRevenue)} accent />
@@ -751,7 +808,7 @@ export default function DashboardPage() {
               </div>
 
               {/* Metode Pembayaran Populer */}
-              <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+              <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-card sm:p-5">
                 <h3 className="font-semibold text-[#0a1633]">{t("admin.popularPaymentMethods")}</h3>
                 {paymentMethods.length ? (
                 <div className="mt-4 space-y-3">
@@ -781,7 +838,7 @@ export default function DashboardPage() {
           <div className="mt-6 grid gap-5 lg:grid-cols-[1.3fr_1fr]">
             {/* Produk Terlaris */}
             <div className="rounded-2xl border border-slate-100 bg-white shadow-card">
-              <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4 sm:px-6">
                 <div>
                   <h3 className="font-semibold text-[#0a1633]">{t("bestSellers")}</h3>
                   <p className="mt-0.5 text-xs text-slate-500">{t("admin.topSoldSubtitle")}</p>
@@ -792,7 +849,7 @@ export default function DashboardPage() {
               </div>
               <div className="divide-y divide-slate-100">
                 {popularProducts.map((p, i) => (
-                  <div key={`${p.name}-${i}`} className="flex items-center gap-4 px-6 py-3.5">
+                  <div key={`${p.name}-${i}`} className="flex items-center gap-4 px-4 py-3.5 sm:px-6">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-xs font-bold text-white">
                       #{i + 1}
                     </span>
@@ -811,7 +868,7 @@ export default function DashboardPage() {
             {/* Top Sellers + Kebutuhan Cepat */}
             <div className="space-y-5">
               <div className="rounded-2xl border border-slate-100 bg-white shadow-card">
-                <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4 sm:px-6">
                   <div>
                     <h3 className="font-semibold text-[#0a1633]">Top Seller</h3>
                     <p className="mt-0.5 text-xs text-slate-500">{t("admin.highestRevenueThisMonth")}</p>
@@ -822,7 +879,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="divide-y divide-slate-100">
                   {topSellers.map((s, i) => (
-                    <div key={`${s.name}-${i}`} className="flex items-center gap-4 px-6 py-3.5">
+                    <div key={`${s.name}-${i}`} className="flex items-center gap-4 px-4 py-3.5 sm:px-6">
                       <span
                         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white ${
                           i === 0 ? "bg-amber-500" : i === 1 ? "bg-slate-400" : "bg-amber-700"
@@ -875,7 +932,7 @@ export default function DashboardPage() {
 
           {/* ====== LAPORAN PRODUK ====== */}
           <div className="mt-6 rounded-2xl border border-slate-100 bg-white shadow-card">
-            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4 sm:px-6">
               <div className="flex items-center gap-3">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-50 text-red-500">
                   <Flag className="h-4 w-4" />
@@ -893,7 +950,7 @@ export default function DashboardPage() {
             {reports.length ? (
               <div className="divide-y divide-slate-100">
                 {reports.slice(0, 6).map((report) => (
-                  <div key={report.id} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center">
+                  <div key={report.id} className="flex flex-col gap-3 px-4 py-4 sm:px-6 sm:flex-row sm:items-center">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="truncate text-sm font-semibold text-[#0a1633]">{report.product_name}</p>
@@ -983,27 +1040,27 @@ function StatCard({
   neutral?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card transition-all hover:shadow-cardHover">
-      <div className="mb-4 flex items-center justify-between">
-        <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconBg}`}>
-          <Icon className={`h-5 w-5 ${iconColor}`} strokeWidth={1.8} />
+    <div className="min-w-0 rounded-2xl border border-slate-100 bg-white p-4 shadow-card transition-all hover:shadow-cardHover sm:p-5">
+      <div className="mb-3 flex items-center justify-between gap-2 sm:mb-4">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl sm:h-10 sm:w-10 ${iconBg}`}>
+          <Icon className={`h-4 w-4 sm:h-5 sm:w-5 ${iconColor}`} strokeWidth={1.8} />
         </div>
         {up ? (
-          <span className="flex items-center gap-0.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-600">
-            <TrendingUp className="h-3 w-3" /> {change}
+          <span className="flex max-w-[58%] items-center gap-0.5 truncate rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-600 sm:max-w-none sm:px-2.5 sm:text-[11px]">
+            <TrendingUp className="h-3 w-3 shrink-0" /> <span className="truncate">{change}</span>
           </span>
         ) : neutral ? (
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+          <span className="max-w-[58%] truncate rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500 sm:max-w-none sm:px-2.5 sm:text-[11px]">
             {change}
           </span>
         ) : (
-          <span className="flex items-center gap-0.5 rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-500">
-            <TrendingDown className="h-3 w-3" /> {change}
+          <span className="flex max-w-[58%] items-center gap-0.5 truncate rounded-full bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-500 sm:max-w-none sm:px-2.5 sm:text-[11px]">
+            <TrendingDown className="h-3 w-3 shrink-0" /> <span className="truncate">{change}</span>
           </span>
         )}
       </div>
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className="mt-1 text-xl font-bold text-[#0a1633]">{value}</p>
+      <p className="text-[11px] font-medium text-slate-500 sm:text-xs">{label}</p>
+      <p className="mt-1 break-words text-base font-bold text-[#0a1633] sm:text-xl">{value}</p>
     </div>
   );
 }

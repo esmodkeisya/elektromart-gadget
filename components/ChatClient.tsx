@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import Link from "next/link";
 import {
   FileText,
   Loader2,
@@ -8,6 +9,7 @@ import {
   Paperclip,
   Send,
   Smile,
+  Store as StoreIcon,
   X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -28,6 +30,7 @@ type Conversation = {
     name: string;
     role: string;
     avatar_url: string | null;
+    store_slug?: string | null;
   };
   last_message: string;
   from_me: boolean;
@@ -167,6 +170,10 @@ export default function ChatClient() {
     () => conversations.find((conversation) => conversation.id === selectedId) ?? null,
     [conversations, selectedId]
   );
+  const selectedProfileHref =
+    selected?.other.role === "seller" && selected.other.store_slug
+      ? `/toko/${selected.other.store_slug}`
+      : null;
 
   function selectConversation(conversationId: string) {
     setSelectedId(conversationId);
@@ -270,41 +277,59 @@ export default function ChatClient() {
         <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
           {conversations.map((conversation) => {
             const gradient = GRADIENTS[conversation.other.id.length % GRADIENTS.length];
+            const profileHref =
+              conversation.other.role === "seller" && conversation.other.store_slug
+                ? `/toko/${conversation.other.store_slug}`
+                : null;
             return (
-              <button
+              <div
                 key={conversation.id}
-                type="button"
-                onClick={() => selectConversation(conversation.id)}
-                className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition ${
+                className={`flex items-center gap-1 rounded-2xl px-3 py-3 transition ${
                   selected?.id === conversation.id ? "bg-brand-orange/10 ring-1 ring-brand-orange/30" : "hover:bg-slate-50"
                 }`}
               >
-                <div className="relative shrink-0">
-                  {conversation.other.avatar_url ? (
-                    <img src={conversation.other.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
-                  ) : (
-                    <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${gradient} text-sm font-bold text-white shadow-sm`}>
-                      {initials(conversation.other.name)}
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-semibold text-slate-900">{conversation.other.name}</p>
-                    {conversation.unread > 0 && (
-                      <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">
-                        {conversation.unread}
-                      </span>
+                <button
+                  type="button"
+                  onClick={() => selectConversation(conversation.id)}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                >
+                  <div className="relative shrink-0">
+                    {conversation.other.avatar_url ? (
+                      <img src={conversation.other.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
+                    ) : (
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${gradient} text-sm font-bold text-white shadow-sm`}>
+                        {initials(conversation.other.name)}
+                      </div>
                     )}
                   </div>
-                  <p className="mt-0.5 truncate text-xs font-medium text-brand-orange/80">
-                    {conversation.other.role === "seller" ? t("chat.seller") : t("chat.buyer")}
-                  </p>
-                  <p className="mt-1 truncate text-xs text-slate-500">
-                    {conversation.from_me ? `${t("chat.you")}: ` : ""}{conversation.last_message || "—"}
-                  </p>
-                </div>
-              </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-sm font-semibold text-slate-900">{conversation.other.name}</p>
+                      {conversation.unread > 0 && (
+                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">
+                          {conversation.unread}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 truncate text-xs font-medium text-brand-orange/80">
+                      {conversation.other.role === "seller" ? t("chat.seller") : t("chat.buyer")}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-slate-500">
+                      {conversation.from_me ? `${t("chat.you")}: ` : ""}{conversation.last_message || "—"}
+                    </p>
+                  </div>
+                </button>
+                {profileHref ? (
+                  <Link
+                    href={profileHref}
+                    aria-label={t("chat.viewStore")}
+                    title={t("chat.viewStore")}
+                    className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-white hover:text-brand-blue"
+                  >
+                    <StoreIcon className="h-4 w-4" />
+                  </Link>
+                ) : null}
+              </div>
             );
           })}
 
@@ -320,21 +345,47 @@ export default function ChatClient() {
       {selected ? (
         <section className="flex min-h-0 flex-col bg-white">
           <header className="flex items-center gap-3 border-b border-slate-200 px-5 py-4 shadow-sm">
-            <div className="flex items-center gap-3">
-              {selected.other.avatar_url ? (
-                <img src={selected.other.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
-              ) : (
-                <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${GRADIENTS[selected.other.id.length % GRADIENTS.length]} text-sm font-bold text-white shadow-sm`}>
-                  {initials(selected.other.name)}
+            {selectedProfileHref ? (
+              <Link
+                href={selectedProfileHref}
+                title={t("chat.viewStore")}
+                aria-label={t("chat.viewStore")}
+                className="group -mx-1 flex items-center gap-3 rounded-xl px-1 py-1 transition hover:bg-slate-50"
+              >
+                {selected.other.avatar_url ? (
+                  <img src={selected.other.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
+                ) : (
+                  <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${GRADIENTS[selected.other.id.length % GRADIENTS.length]} text-sm font-bold text-white shadow-sm`}>
+                    {initials(selected.other.name)}
+                  </div>
+                )}
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 group-hover:text-brand-blue group-hover:underline">
+                    {selected.other.name}
+                  </h2>
+                  <p className="text-xs text-emerald-600">
+                    {selected.other.role === "seller" ? t("chat.seller") : t("chat.buyer")}
+                  </p>
                 </div>
-              )}
-              <div>
-                <h2 className="text-base font-bold text-slate-900">{selected.other.name}</h2>
-                <p className="text-xs text-emerald-600">
-                  {selected.other.role === "seller" ? t("chat.seller") : t("chat.buyer")}
-                </p>
+                <StoreIcon className="h-4 w-4 text-slate-400 group-hover:text-brand-blue" />
+              </Link>
+            ) : (
+              <div className="flex items-center gap-3">
+                {selected.other.avatar_url ? (
+                  <img src={selected.other.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
+                ) : (
+                  <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${GRADIENTS[selected.other.id.length % GRADIENTS.length]} text-sm font-bold text-white shadow-sm`}>
+                    {initials(selected.other.name)}
+                  </div>
+                )}
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">{selected.other.name}</h2>
+                  <p className="text-xs text-emerald-600">
+                    {selected.other.role === "seller" ? t("chat.seller") : t("chat.buyer")}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </header>
 
           <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-b from-slate-50 to-white">

@@ -12,16 +12,6 @@ interface FormState {
   password: string;
 }
 
-const DEMO_ACCOUNTS = [
-  { role: "buyer", email: "secretbaik010@gmail.com", name: "Asep mulyadi" },
-  { role: "buyer", email: "cecepspy@gmail.com", name: "Cecep supriyadi" },
-  { role: "seller", email: "usergrafika01@gmail.com", name: "grfseller" },
-  { role: "seller", email: "usergrafika02@gmail.com", name: "Jaya store" },
-  { role: "admin", email: "esmodkeisya@gmail.com", name: "Keisya esmod" },
-] as const;
-
-const DEMO_PASSWORD = "12345678";
-
 export default function LoginPage() {
   const router = useRouter();
   const { t } = useLanguage();
@@ -205,31 +195,6 @@ export default function LoginPage() {
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           )}
         </button>
-
-        <details open className="group rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 text-[12.5px]">
-          <summary className="cursor-pointer list-none font-semibold text-slate-600 outline-none">
-            {t("auth.demoAccountsTitle")}
-          </summary>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">{t("auth.demoAccountsHint")}</p>
-          <ul className="mt-2 space-y-1.5">
-            {DEMO_ACCOUNTS.map((account) => (
-              <li key={account.email}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setForm({ identitas: account.email, password: DEMO_PASSWORD })
-                  }
-                  className="flex w-full items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1.5 text-left transition-colors hover:border-brand-blue/20 hover:bg-white"
-                >
-                  <span className="min-w-0 truncate text-slate-700">{account.email}</span>
-                  <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-brand-blue ring-1 ring-slate-200">
-                    {t(`auth.${account.role}`)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
 
         <p className="pt-1 text-center text-sm text-slate-500">
           {t("auth.noAccount")}{" "}

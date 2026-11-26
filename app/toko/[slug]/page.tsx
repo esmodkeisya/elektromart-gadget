@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { Star, Store as StoreIcon, BadgeCheck, CalendarDays, Package, MapPin } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
@@ -14,6 +15,7 @@ import { useLanguage } from "@/lib/i18n";
 type StoreRecord = {
   id: string;
   name?: string;
+  full_name?: string | null;
   store_name?: string | null;
   store_address?: string | null;
   avatar_url?: string | null;
@@ -27,8 +29,6 @@ type StoreRecord = {
   product_count?: number;
   active_product_count?: number;
 };
-
-const STORE_SLUG = "jaya-store";
 
 function formatDate(value?: string | null) {
   if (!value) return "-";
@@ -45,6 +45,8 @@ function formatDate(value?: string | null) {
 
 export default function StorePage() {
   const { t } = useLanguage();
+  const params = useParams<{ slug: string }>();
+  const storeSlug = String(params?.slug || "");
   const liveProducts = useLiveProducts();
   const [store, setStore] = useState<StoreRecord | null>(null);
   const [reviews, setReviews] = useState<ReviewRecord[]>([]);
@@ -55,8 +57,10 @@ export default function StorePage() {
     void api<{ stores: StoreRecord[] }>("/api/stores")
       .then((data) => {
         if (!active) return;
-        const found = (data.stores || []).find(
-          (s) => (s.store_name && slugify(s.store_name) === STORE_SLUG) || slugify(s.name || "") === STORE_SLUG
+        const found = (data.stores || []).find((s) =>
+          [s.store_name, s.full_name, s.name].some(
+            (value) => value && slugify(value) === storeSlug
+          )
         );
         setStore(found || null);
       })
@@ -69,7 +73,7 @@ export default function StorePage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [storeSlug]);
 
   useEffect(() => {
     if (!store?.id) {
@@ -90,11 +94,11 @@ export default function StorePage() {
   }, [store?.id]);
 
   const products = useMemo(() => {
-    let list = store ? liveProducts.filter((p) => p.seller_id === store.id) : liveProducts;
+    let list = store ? liveProducts.filter((p) => p.seller_id === store.id) : [];
     return list.filter((p) => p.status === "active").map(recordToProduct);
   }, [liveProducts, store]);
 
-  const storeName = store?.store_name || "Jaya store";
+  const storeName = store?.store_name || store?.full_name || storeSlug || "Toko";
   const location = store?.store_address || "Jakarta";
   const rating = Number(store?.rating) || 0;
   const reviewCount = Number(store?.review_count) || 0;
@@ -127,9 +131,9 @@ export default function StorePage() {
           <div className="px-6 pb-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div className="flex min-w-0 items-end gap-4">
-                <span className="-mt-12 flex h-24 w-24 shrink-0 items-center justify-center rounded-2xl border-4 border-white bg-blue-50 text-brand-blue shadow-sm">
+                <span className="-mt-12 flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-blue-50 text-brand-blue shadow-sm">
                   {store?.avatar_url ? (
-                    <img src={store.avatar_url} alt={storeName} className="h-full w-full rounded-xl object-cover" />
+                    <img src={store.avatar_url} alt={storeName} className="h-full w-full rounded-full object-cover" />
                   ) : (
                     <StoreIcon className="h-10 w-10" />
                   )}
@@ -200,6 +204,8 @@ export default function StorePage() {
             </div>
             {loading ? (
               <p className="py-10 text-center text-sm text-slate-400">{t("store.loading")}</p>
+            ) : !store ? (
+              <p className="py-10 text-center text-sm text-slate-400">{t("store.notFound")}</p>
             ) : products.length === 0 ? (
               <p className="py-10 text-center text-sm text-slate-400">{t("store.noProducts")}</p>
             ) : (

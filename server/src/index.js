@@ -2435,6 +2435,9 @@ app.get("/api/conversations", requireUser, async (req, res) => {
   for (const c of convos) {
     const otherId = c.buyer_id === me.id ? c.seller_id : c.buyer_id;
     const other = await prisma.profile.findUnique({ where: { id: otherId } });
+    const otherDisplayName = other?.store_name || other?.full_name || "";
+    const storeSlug =
+      other?.role === "seller" && otherDisplayName ? slugify(otherDisplayName) : null;
     const last = await prisma.message.findFirst({ where: { conversation_id: c.id }, orderBy: { created_at: "desc" } });
     const lastReadAt = me.role === "seller" ? c.seller_last_read_at : c.buyer_last_read_at;
     const unread = await prisma.message.count({
@@ -2451,6 +2454,7 @@ app.get("/api/conversations", requireUser, async (req, res) => {
             : other?.store_name || other?.full_name || "Penjual",
         role: other?.role || "buyer",
         avatar_url: other?.avatar_url || null,
+        store_slug: storeSlug,
       },
       last_message: last
         ? attachment?.type === "video"

@@ -126,7 +126,7 @@ export default function SellerProfile() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-y-auto bg-seller-canvas">
+    <div className="flex flex-1 flex-col bg-seller-canvas md:overflow-y-auto">
       <TopBar placeholder={t("seller.searchOrdersProducts")} />
 
       <form onSubmit={handleSubmit} className="px-5 pb-10 pt-5 sm:px-8 sm:pt-6">
@@ -198,12 +198,12 @@ export default function SellerProfile() {
               {schedule.map((item, index) => {
                 const day = t(item.dayKey);
                 return (
-                <div key={item.dayKey} className="grid grid-cols-[1fr_auto] items-center gap-3 py-3 sm:grid-cols-[135px_1fr_44px]">
+                <div key={item.dayKey} className="grid grid-cols-1 items-center gap-3 py-3 sm:grid-cols-[135px_1fr_44px]">
                   <span className="text-[11px] text-seller-ink">{day}</span>
                   <div className="flex items-center gap-2 sm:justify-start">
-                    <input aria-label={`${day} ${t("seller.start")}`} value={item.start} onChange={(event) => updateSchedule(index, "start", event.target.value)} className="h-9 w-[92px] rounded-md border border-[#D8DFEC] bg-[#FAFBFE] px-2 text-[11px] text-seller-ink outline-none focus:border-seller-navy" />
+                    <input aria-label={`${day} ${t("seller.start")}`} value={item.start} onChange={(event) => updateSchedule(index, "start", event.target.value)} className="h-9 w-full min-w-0 flex-1 rounded-md border border-[#D8DFEC] bg-[#FAFBFE] px-2 text-[11px] text-seller-ink outline-none focus:border-seller-navy sm:w-[92px] sm:flex-none" />
                     <span className="text-[11px] text-seller-muted">-</span>
-                    <input aria-label={`${day} ${t("seller.end")}`} value={item.end} onChange={(event) => updateSchedule(index, "end", event.target.value)} className="h-9 w-[92px] rounded-md border border-[#D8DFEC] bg-[#FAFBFE] px-2 text-[11px] text-seller-ink outline-none focus:border-seller-navy" />
+                    <input aria-label={`${day} ${t("seller.end")}`} value={item.end} onChange={(event) => updateSchedule(index, "end", event.target.value)} className="h-9 w-full min-w-0 flex-1 rounded-md border border-[#D8DFEC] bg-[#FAFBFE] px-2 text-[11px] text-seller-ink outline-none focus:border-seller-navy sm:w-[92px] sm:flex-none" />
                   </div>
                   <button
                     type="button"
@@ -221,7 +221,7 @@ export default function SellerProfile() {
             </div>
           </section>
 
-          <div className="mt-5 flex items-center justify-end gap-2">
+          <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
             {saved && <span className="mr-2 flex items-center gap-1 text-[11px] font-semibold text-emerald-600"><Check size={14} /> {t("seller.changesSaved")}</span>}
             <button type="button" onClick={() => window.history.back()} className="rounded-md border border-[#D8DFEC] bg-white px-5 py-2 text-[11px] font-semibold text-seller-muted hover:bg-[#F8FAFD]">{t("admin.cancel")}</button>
             <button type="submit" disabled={isSaving || isLoading} className="rounded-md bg-seller-navy px-5 py-2 text-[11px] font-semibold text-white hover:bg-[#07164A] disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Menyimpan..." : t("admin.saveChanges")}</button>

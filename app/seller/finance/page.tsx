@@ -569,10 +569,10 @@ export default function Finance() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-seller-canvas">
-      <div className="flex items-start justify-between gap-4 px-8 pb-2 pt-8">
-        <h1 className="text-[28px] font-bold tracking-tight text-seller-ink">{t("seller.financeWallet")}</h1>
-        <div className="flex flex-col items-end gap-3">
+    <div className="flex-1 bg-seller-canvas md:overflow-y-auto">
+      <div className="flex flex-wrap items-start justify-between gap-4 px-4 pb-2 pt-5 sm:px-6 sm:pt-8 lg:px-8">
+        <h1 className="text-2xl font-bold tracking-tight text-seller-ink sm:text-[28px]">{t("seller.financeWallet")}</h1>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-col sm:items-end sm:gap-3">
           <TopBar variant="inline" />
           <button
             type="button"
@@ -587,7 +587,7 @@ export default function Finance() {
         </div>
       </div>
 
-      <div className="px-8 pb-10 pt-4">
+      <div className="px-4 pb-10 pt-4 sm:px-6 lg:px-8">
         {error ? (
           <div className="mb-5 rounded-xl bg-[#FDECEC] px-4 py-3 text-sm font-medium text-[#E11D48]">{error}</div>
         ) : null}
@@ -610,9 +610,9 @@ export default function Finance() {
         ) : null}
 
         <div className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <div className="relative overflow-hidden rounded-2xl bg-seller-navy p-8 text-white xl:col-span-2">
+          <div className="relative overflow-hidden rounded-2xl bg-seller-navy p-5 text-white sm:p-8 xl:col-span-2">
             <p className="text-[11px] font-semibold tracking-[0.16em] text-[#9DB4E8]">{t("seller.activeBalance")}</p>
-            <p className="mt-3 text-[36px] font-bold leading-none">
+            <p className="mt-3 break-words text-[26px] font-bold leading-tight sm:text-[36px] sm:leading-none">
               {loading ? "…" : formatRupiah(data.summary.availableBalance)}
             </p>
             <p className="mt-3 text-sm text-[#9DB4E8]">{t("seller.balanceReadyToWithdraw")}</p>
@@ -812,8 +812,8 @@ export default function Finance() {
           ) : transactions.length === 0 ? (
             <p className="py-10 text-center text-sm text-seller-muted">{t("sellerFinance.transactionEmpty")}</p>
           ) : (
-            <div className="overflow-hidden rounded-xl">
-              <table className="w-full text-left text-sm">
+            <div className="overflow-x-auto rounded-xl">
+              <table className="w-full min-w-[900px] text-left text-sm">
                 <thead>
                   <tr className="bg-[#EEF3FA] text-[13px] text-seller-ink">
                     <th className="px-4 py-3 font-semibold">{t("admin.transactionId")}</th>

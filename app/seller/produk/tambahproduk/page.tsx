@@ -178,10 +178,10 @@ export default function AddProduct() {
     "relative aspect-square w-full overflow-hidden rounded-xl border-2 border-dashed border-[#D6DCE8] bg-[#F8FAFC]";
 
   return (
-    <div className="flex-1 overflow-y-auto bg-seller-canvas">
-      <div className="flex items-center justify-between px-8 pb-6 pt-8">
-        <h1 className="text-[28px] font-bold tracking-tight text-seller-ink">{productId ? t("seller.editProduct") : t("seller.addNewProduct")}</h1>
-        <div className="flex gap-3">
+    <div className="flex-1 bg-seller-canvas md:overflow-y-auto">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-6 pt-5 sm:px-6 sm:pt-8 lg:px-8">
+        <h1 className="min-w-0 text-2xl font-bold tracking-tight text-seller-ink sm:text-[28px]">{productId ? t("seller.editProduct") : t("seller.addNewProduct")}</h1>
+        <div className="flex flex-wrap gap-2 sm:gap-3">
           <button
             type="button"
             onClick={() => router.push("/seller/produk")}
@@ -199,9 +199,9 @@ export default function AddProduct() {
         </div>
       </div>
 
-      {error ? <p className="px-8 pb-2 text-sm text-red-600">{error}</p> : null}
+      {error ? <p className="px-4 pb-2 text-sm text-red-600 sm:px-6 lg:px-8">{error}</p> : null}
 
-      <div className="grid grid-cols-1 gap-5 px-8 pb-10 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 px-4 pb-10 sm:px-6 lg:px-8 xl:grid-cols-3">
         <div className="flex flex-col gap-5 xl:col-span-2">
           <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6">
             <h2 className="text-lg font-bold text-seller-ink">{t("admin.basicInfo")}</h2>

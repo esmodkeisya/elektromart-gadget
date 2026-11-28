@@ -82,17 +82,17 @@ export default function Products() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-seller-canvas">
-      <div className="px-8 pb-10 pt-8">
-        <div className="mb-6 flex items-start justify-between">
-          <div>
-            <h1 className="text-[28px] font-bold tracking-tight text-seller-ink">{t("seller.productManagement")}</h1>
+    <div className="flex-1 bg-seller-canvas md:overflow-y-auto">
+      <div className="px-4 pb-10 pt-5 sm:px-6 sm:pt-8 lg:px-8">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight text-seller-ink sm:text-[28px]">{t("seller.productManagement")}</h1>
             <p className="mt-1 text-sm text-seller-muted">{t("seller.manageProductsSubtitle")}</p>
           </div>
           <button
             type="button"
             onClick={() => router.push("/seller/produk/tambahproduk")}
-            className="flex items-center gap-2 rounded-xl bg-seller-navy px-4 py-2.5 text-sm font-semibold text-white"
+            className="flex shrink-0 items-center gap-2 rounded-xl bg-seller-navy px-4 py-2.5 text-sm font-semibold text-white"
           >
             <Plus size={16} /> {t("seller.addProduct")}
           </button>
@@ -115,8 +115,8 @@ export default function Products() {
             ))}
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[#EEF1F6]">
-            <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto rounded-xl border border-[#EEF1F6]">
+            <table className="w-full min-w-[640px] text-left text-sm">
               <thead>
                 <tr className="bg-[#F4F6FA] text-[13px] text-seller-ink">
                   <th className="px-4 py-3 font-semibold">{t("products")}</th>

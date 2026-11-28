@@ -101,11 +101,13 @@ export default function TopBar({ variant = "bar" }: TopBarProps) {
     <header
       className={
         variant === "inline"
-          ? "flex items-center justify-end gap-3"
-          : "flex items-center justify-end gap-4 px-8 pb-1 pt-6"
+          ? "flex items-center justify-end gap-3 pr-3"
+          : "flex items-center justify-end gap-4 px-4 pb-1 pt-2 sm:px-6 md:px-8 md:pt-6"
       }
     >
-      <LanguageSwitcher variant="light" />
+      <div className="hidden md:block">
+        <LanguageSwitcher variant="light" />
+      </div>
       <div className="relative" ref={wrapperRef}>
         <button
           type="button"
@@ -122,7 +124,7 @@ export default function TopBar({ variant = "bar" }: TopBarProps) {
         </button>
 
         {open && (
-          <div className="absolute right-0 top-9 z-50 w-80 overflow-hidden rounded-2xl border border-[#E8ECF3] bg-white shadow-xl">
+          <div className="absolute right-0 top-9 z-50 w-[min(20rem,calc(100vw-4rem))] overflow-hidden rounded-2xl border border-[#E8ECF3] bg-white shadow-xl">
             <div className="border-b border-[#EEF1F6] px-4 py-3 text-sm font-bold text-seller-ink">
               {t("seller.notifications")}
             </div>
@@ -170,7 +172,7 @@ export default function TopBar({ variant = "bar" }: TopBarProps) {
           </div>
         )}
       </div>
-      <button type="button" onClick={() => router.push("/seller/profile")} aria-label={t("seller.openStoreProfile")}>
+      <button type="button" onClick={() => router.push("/seller/profile")} aria-label={t("seller.openStoreProfile")} className="hidden md:block">
         <SellerAvatar />
       </button>
     </header>

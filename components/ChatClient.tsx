@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import {
+  ArrowLeft,
   FileText,
   Loader2,
   MessageCircleMore,
@@ -82,6 +83,7 @@ export default function ChatClient() {
   const { t } = useLanguage();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -113,6 +115,7 @@ export default function ChatClient() {
         const param = new URLSearchParams(window.location.search).get("conversation");
         if (param && list.some((conversation) => conversation.id === param)) {
           setSelectedId(param);
+          setMobileThreadOpen(true);
           void refreshMessages(param);
         }
       }
@@ -177,6 +180,7 @@ export default function ChatClient() {
 
   function selectConversation(conversationId: string) {
     setSelectedId(conversationId);
+    setMobileThreadOpen(true);
     setMessages([]);
     setShowEmojiPicker(false);
     void refreshMessages(conversationId);
@@ -258,8 +262,8 @@ export default function ChatClient() {
   }
 
   return (
-    <div className="grid min-h-0 flex-1 lg:grid-cols-[340px_1fr]">
-      <aside className="flex min-h-0 flex-col border-b border-slate-200 bg-white lg:border-b-0 lg:border-r">
+    <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[340px_1fr]">
+      <aside className={`${mobileThreadOpen ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-b border-slate-200 bg-white lg:border-b-0 lg:border-r`}>
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-orange">{t("chat.inbox")}</p>
@@ -343,8 +347,16 @@ export default function ChatClient() {
       </aside>
 
       {selected ? (
-        <section className="flex min-h-0 flex-col bg-white">
+        <section className={`${mobileThreadOpen ? "flex" : "hidden"} min-h-0 flex-col bg-white lg:flex`}>
           <header className="flex items-center gap-3 border-b border-slate-200 px-5 py-4 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setMobileThreadOpen(false)}
+              aria-label="Kembali ke daftar chat"
+              className="-ml-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 lg:hidden"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
             {selectedProfileHref ? (
               <Link
                 href={selectedProfileHref}

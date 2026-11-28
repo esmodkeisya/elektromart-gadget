@@ -101,28 +101,30 @@ export default function PaymentSuccessPage() {
 
         {/* Perjalanan pesanan: satu kartu, tiga langkah tersambung */}
         <div className="mt-7 rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
-          <div className="relative grid grid-cols-3">
-            <span className="absolute left-[16.6667%] right-[16.6667%] top-4 h-0.5 bg-slate-200" />
-            {steps.map((step) => {
-              const Icon = step.icon;
-              return (
-                <div key={step.title} className="relative flex flex-col items-center px-1 text-center">
-                  <span
-                    className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full ${
-                      step.done
-                        ? "bg-emerald-500 text-white ring-4 ring-emerald-50"
-                        : "border-2 border-slate-200 bg-white text-slate-300"
-                    }`}
-                  >
-                    {step.done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
-                  </span>
-                  <p className={`mt-2 text-xs font-semibold ${step.done ? "text-emerald-700" : "text-slate-700"}`}>
-                    {step.title}
-                  </p>
-                  <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-400">{step.desc}</p>
-                </div>
-              );
-            })}
+          <div className="overflow-x-auto">
+            <div className="relative grid min-w-[360px] grid-cols-3">
+              <span className="absolute left-[16.6667%] right-[16.6667%] top-4 h-0.5 bg-slate-200" />
+              {steps.map((step) => {
+                const Icon = step.icon;
+                return (
+                  <div key={step.title} className="relative flex flex-col items-center px-1 text-center">
+                    <span
+                      className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full ${
+                        step.done
+                          ? "bg-emerald-500 text-white ring-4 ring-emerald-50"
+                          : "border-2 border-slate-200 bg-white text-slate-300"
+                      }`}
+                    >
+                      {step.done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+                    </span>
+                    <p className={`mt-2 text-xs font-semibold ${step.done ? "text-emerald-700" : "text-slate-700"}`}>
+                      {step.title}
+                    </p>
+                    <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-400">{step.desc}</p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 

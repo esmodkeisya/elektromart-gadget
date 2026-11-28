@@ -161,41 +161,43 @@ export default function TrackOrderPage() {
                 </div>
               ) : (
                 <div className="mt-8">
-                  <div className="relative grid grid-cols-4">
-                    <span className="absolute left-[12.5%] right-[12.5%] top-4 h-0.5 bg-slate-200" />
-                    {currentStep > 0 ? (
-                      <span
-                        className="absolute left-[12.5%] top-4 h-0.5 bg-brand-blue"
-                        style={{ width: `${(currentStep / (STEP_META.length - 1)) * 75}%` }}
-                      />
-                    ) : null}
-                    {STEP_META.map((step, index) => {
-                      const done = index < currentStep;
-                      const current = index === currentStep;
-                      const Icon = step.icon;
-                      return (
-                        <div key={step.code} className="relative flex flex-col items-center text-center">
-                          <span
-                            className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 ${
-                              done
-                                ? "border-brand-blue bg-brand-blue text-white"
-                                : current
-                                  ? "border-brand-blue bg-white text-brand-blue ring-4 ring-blue-100"
-                                  : "border-slate-200 bg-white text-slate-300"
-                            }`}
-                          >
-                            {done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
-                          </span>
-                          <p
-                            className={`mt-2 text-[11px] font-semibold ${
-                              current ? "text-brand-blue" : done ? "text-navy-900" : "text-slate-400"
-                            }`}
-                          >
-                            {t(step.labelKey)}
-                          </p>
-                        </div>
-                      );
-                    })}
+                  <div className="overflow-x-auto">
+                    <div className="relative grid min-w-[420px] grid-cols-4">
+                      <span className="absolute left-[12.5%] right-[12.5%] top-4 h-0.5 bg-slate-200" />
+                      {currentStep > 0 ? (
+                        <span
+                          className="absolute left-[12.5%] top-4 h-0.5 bg-brand-blue"
+                          style={{ width: `${(currentStep / (STEP_META.length - 1)) * 75}%` }}
+                        />
+                      ) : null}
+                      {STEP_META.map((step, index) => {
+                        const done = index < currentStep;
+                        const current = index === currentStep;
+                        const Icon = step.icon;
+                        return (
+                          <div key={step.code} className="relative flex flex-col items-center text-center">
+                            <span
+                              className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 ${
+                                done
+                                  ? "border-brand-blue bg-brand-blue text-white"
+                                  : current
+                                    ? "border-brand-blue bg-white text-brand-blue ring-4 ring-blue-100"
+                                    : "border-slate-200 bg-white text-slate-300"
+                              }`}
+                            >
+                              {done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+                            </span>
+                            <p
+                              className={`mt-2 text-[11px] font-semibold ${
+                                current ? "text-brand-blue" : done ? "text-navy-900" : "text-slate-400"
+                              }`}
+                            >
+                              {t(step.labelKey)}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               )}

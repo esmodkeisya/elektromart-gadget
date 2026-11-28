@@ -369,16 +369,16 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-seller-canvas">
+    <div className="flex-1 bg-seller-canvas md:overflow-y-auto">
       <TopBar placeholder={t("seller.searchOrdersProducts")} />
 
-      <div className="px-8 pb-10 pt-4">
-        <div className="mb-6 flex items-start justify-between">
-          <div>
-            <h1 className="text-[28px] font-bold tracking-tight text-seller-ink">{t("seller.businessSummary")}</h1>
+      <div className="px-4 pb-10 pt-4 sm:px-6 lg:px-8">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight text-seller-ink sm:text-[28px]">{t("seller.businessSummary")}</h1>
             <p className="mt-1 text-sm text-seller-muted">{t("seller.storePerformanceToday")}, {todayLabel}</p>
           </div>
-          <div className="flex flex-col items-end gap-3">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-col sm:items-end sm:gap-3">
             <button type="button" className="flex items-center gap-2 rounded-xl border border-[#E4E8F1] bg-white px-4 py-2.5 text-sm font-medium text-seller-ink shadow-sm">
               <CalendarDays size={16} className="text-seller-muted" />
               {t("seller.last7Days")}
@@ -478,38 +478,40 @@ export default function Dashboard() {
               </button>
             </div>
 
-            <div className="flex h-[250px] gap-3">
-              <div className="flex w-10 flex-col justify-between pb-6 text-right text-[11px] text-seller-muted">
-                {yTicks.map((tick, index) => (
-                  <span key={`${tick}-${index}`}>{tick}</span>
-                ))}
-              </div>
-              <div className="relative flex flex-1 items-end justify-between gap-3 border-l border-[#EEF1F6] pl-3">
-                <div className="pointer-events-none absolute inset-0 flex flex-col justify-between pb-6">
+            <div className="overflow-x-auto">
+              <div className="flex h-[250px] min-w-[560px] gap-3">
+                <div className="flex w-10 flex-col justify-between pb-6 text-right text-[11px] text-seller-muted">
                   {yTicks.map((tick, index) => (
-                    <div key={`${tick}-${index}`} className="border-t border-[#F1F4F8]" />
+                    <span key={`${tick}-${index}`}>{tick}</span>
                   ))}
                 </div>
-                {chartPoints.map((d, idx) => {
-                  const isPeak = idx === peakIndex && d.value > 0;
-                  const heightPct = d.value > 0 ? (d.value / peakValue) * 100 : 3;
-                  return (
-                    <div key={d.day} className="relative z-10 flex h-full flex-1 flex-col items-center justify-end">
-                      {isPeak && (
-                        <span className="mb-2 rounded-md bg-seller-ink px-2 py-1 text-[11px] font-semibold text-white">
-                          {fmtJt(d.value)}
+                <div className="relative flex flex-1 items-end justify-between gap-3 border-l border-[#EEF1F6] pl-3">
+                  <div className="pointer-events-none absolute inset-0 flex flex-col justify-between pb-6">
+                    {yTicks.map((tick, index) => (
+                      <div key={`${tick}-${index}`} className="border-t border-[#F1F4F8]" />
+                    ))}
+                  </div>
+                  {chartPoints.map((d, idx) => {
+                    const isPeak = idx === peakIndex && d.value > 0;
+                    const heightPct = d.value > 0 ? (d.value / peakValue) * 100 : 3;
+                    return (
+                      <div key={d.day} className="relative z-10 flex h-full flex-1 flex-col items-center justify-end">
+                        {isPeak && (
+                          <span className="mb-2 rounded-md bg-seller-ink px-2 py-1 text-[11px] font-semibold text-white">
+                            {fmtJt(d.value)}
+                          </span>
+                        )}
+                        <div
+                          className={`w-9 rounded-t-md ${isPeak ? "bg-seller-navy" : "bg-[#D7DEEA]"}`}
+                          style={{ height: `${heightPct}%` }}
+                        />
+                        <span className={`mt-2 text-xs ${isPeak ? "font-semibold text-seller-ink" : "text-seller-muted"}`}>
+                          {t(d.key)}
                         </span>
-                      )}
-                      <div
-                        className={`w-9 rounded-t-md ${isPeak ? "bg-seller-navy" : "bg-[#D7DEEA]"}`}
-                        style={{ height: `${heightPct}%` }}
-                      />
-                      <span className={`mt-2 text-xs ${isPeak ? "font-semibold text-seller-ink" : "text-seller-muted"}`}>
-                        {t(d.key)}
-                      </span>
-                    </div>
-                  );
-                })}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>

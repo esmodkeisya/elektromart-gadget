@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Globe } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 
-type Variant = "navbar" | "light" | "auth";
+type Variant = "navbar" | "light" | "auth" | "compact";
 
 export default function LanguageSwitcher({ variant = "light" }: { variant?: Variant }) {
   const { language, setLanguage, t } = useLanguage();
@@ -22,9 +22,11 @@ export default function LanguageSwitcher({ variant = "light" }: { variant?: Vari
   const triggerClass =
     variant === "navbar"
       ? "flex items-center gap-1.5 text-sm font-medium text-white"
-      : variant === "auth"
-        ? "flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-navy-900 shadow-sm"
-        : "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-navy-900";
+      : variant === "compact"
+        ? "flex h-9 w-9 items-center justify-center rounded-full text-white hover:bg-white/10"
+        : variant === "auth"
+          ? "flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-navy-900 shadow-sm"
+          : "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-navy-900";
 
   const menuClass =
     variant === "navbar"
@@ -41,8 +43,12 @@ export default function LanguageSwitcher({ variant = "light" }: { variant?: Vari
         aria-expanded={open}
       >
         <Globe className="h-4 w-4" />
-        {language === "id" ? "ID" : "EN"}
-        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+        {variant === "compact" ? null : (
+          <>
+            {language === "id" ? "ID" : "EN"}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+          </>
+        )}
       </button>
       {open ? (
         <div className={menuClass}>

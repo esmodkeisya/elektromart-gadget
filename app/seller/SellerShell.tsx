@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { CircleHelp, LayoutGrid, Home, Package, ShoppingCart, Wallet, Flag, MessageCircle } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
+import Navbar from "@/components/Navbar";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -23,7 +24,10 @@ export default function SellerShell({ children }: { children: ReactNode }) {
   const { t } = useLanguage();
 
   return (
-    <div className={`${inter.className} flex h-screen overflow-hidden bg-seller-canvas`}>
+    <div className={`${inter.className} flex min-h-screen flex-col bg-seller-canvas md:h-screen md:flex-row md:overflow-hidden`}>
+      <div className="md:hidden">
+        <Navbar />
+      </div>
       <aside className="hidden h-full w-[240px] shrink-0 flex-col bg-seller-navy px-4 py-6 text-white md:flex">
         <Link href="/seller/dashboard" className="mb-10 block px-3">
           <span className="block text-[20px] font-bold leading-tight tracking-tight">ElektroMart</span>
@@ -56,7 +60,7 @@ export default function SellerShell({ children }: { children: ReactNode }) {
           </Link>
         </div>
       </aside>
-      <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+      <main className="min-w-0 flex-1 md:overflow-y-auto">{children}</main>
     </div>
   );
 }

@@ -88,16 +88,16 @@ export default function SellerReports() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-seller-canvas">
+    <div className="flex-1 bg-seller-canvas md:overflow-y-auto">
       <TopBar variant="inline" />
 
-      <div className="px-8 pb-10 pt-4">
-        <div className="mb-6 flex items-start justify-between">
-          <div>
-            <h1 className="text-[28px] font-bold tracking-tight text-seller-ink">{t("report.sellerTitle")}</h1>
+      <div className="px-4 pb-10 pt-4 sm:px-6 lg:px-8">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight text-seller-ink sm:text-[28px]">{t("report.sellerTitle")}</h1>
             <p className="mt-1 text-sm text-seller-muted">{t("report.sellerSubtitle")}</p>
           </div>
-          <span className="flex items-center gap-2 rounded-xl bg-[#FFF4E5] px-4 py-2.5 text-sm font-semibold text-[#D97706]">
+          <span className="flex shrink-0 items-center gap-2 rounded-xl bg-[#FFF4E5] px-4 py-2.5 text-sm font-semibold text-[#D97706]">
             <Flag size={16} />
             {pendingCount} {t("report.pendingCount")}
           </span>

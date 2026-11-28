@@ -8,7 +8,7 @@ export default function SellerChatPage() {
   const { t } = useLanguage();
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col md:h-full">
       <TopBar placeholder={t("seller.searchOrdersBuyers")} />
       <ChatClient />
     </div>

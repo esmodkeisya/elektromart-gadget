@@ -425,12 +425,12 @@ export default function Orders() {
   const tabs = (Object.keys(TAB_STATUS) as TabId[]).map((id) => ({ id, labelKey: TAB_LABEL[id], count: counts[id] }));
 
   return (
-    <div className="flex-1 overflow-y-auto bg-seller-canvas">
+    <div className="flex-1 bg-seller-canvas md:overflow-y-auto">
       <TopBar placeholder={t("seller.searchOrdersBuyers")} />
 
-      <div className="px-8 pb-10 pt-4">
+      <div className="px-4 pb-10 pt-4 sm:px-6 lg:px-8">
         <div className="mb-6">
-          <h1 className="text-[28px] font-bold tracking-tight text-seller-ink">{t("seller.orderManagement")}</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-seller-ink sm:text-[28px]">{t("seller.orderManagement")}</h1>
           <p className="mt-1 text-sm text-seller-muted">{t("seller.orderManagementSubtitle")}</p>
           <p className="mt-1 text-xs text-seller-muted">{t("seller.ordersScopeHint")}</p>
         </div>
@@ -594,7 +594,7 @@ export default function Orders() {
                           ) : null}
                         </div>
 
-                        <div className="flex w-full items-end justify-between gap-4 border-[#EEF1F6] lg:w-auto lg:flex-col lg:items-end lg:border-l lg:pl-5">
+                        <div className="flex w-full flex-wrap items-end justify-between gap-3 border-[#EEF1F6] lg:w-auto lg:flex-col lg:items-end lg:border-l lg:pl-5">
                           <div className="text-right">
                             <p className="text-xs text-seller-muted">{t("admin.totalSpend")}</p>
                             <p className="text-base font-bold text-seller-ink">{formatRupiah(o.total)}</p>

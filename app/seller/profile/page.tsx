@@ -5,7 +5,7 @@ import { Check, ImagePlus, Upload } from "lucide-react";
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
 import { api } from "@/lib/api";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 
 interface Schedule {
   dayKey: string;
@@ -67,19 +67,19 @@ export default function SellerProfile() {
       setError("Ukuran gambar maksimal 2MB.");
       return;
     }
-    const { data: sessionData } = await supabase.auth.getSession();
+    const { data: sessionData } = await localAuth.auth.getSession();
     const userId = sessionData.session?.user.id;
     if (!userId) {
       setError("Sesi login tidak ditemukan. Silakan login ulang.");
       return;
     }
     const path = `${userId}/${type}-${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from("avatars").upload(path, file, { upsert: true, contentType: file.type });
+    const { error: uploadError } = await localAuth.storage.from("avatars").upload(path, file, { upsert: true, contentType: file.type });
     if (uploadError) {
       setError(`Upload gagal: ${uploadError.message}`);
       return;
     }
-    const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+    const { data } = localAuth.storage.from("avatars").getPublicUrl(path);
     if (type === "logo") {
       setLogoName(file.name);
       setLogoUrl(data.publicUrl);

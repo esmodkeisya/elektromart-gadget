@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Search, MessageCircle, ShoppingCart, Menu, X, UserCircle, LayoutGrid, User as UserIcon } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 import { getAllProducts } from "@/lib/data";
 import { useLiveProducts } from "@/hooks/useLiveProducts";
 import { useLanguage } from "@/lib/i18n";
@@ -77,12 +77,12 @@ export default function Navbar() {
   useEffect(() => {
     let mounted = true;
     async function loadUser() {
-      const { data } = await supabase.auth.getUser();
+      const { data } = await localAuth.auth.getUser();
       if (!mounted || !data.user) return;
       const email = data.user.email ?? "";
       setUserEmail(email);
       setUserName(data.user.user_metadata?.full_name || email.split("@")[0] || t("profile"));
-      const { data: profile } = await supabase.from("profiles").select("avatar_url, full_name, role").eq("id", data.user.id).maybeSingle();
+      const { data: profile } = await localAuth.from("profiles").select("avatar_url, full_name, role").eq("id", data.user.id).maybeSingle();
       if (mounted) {
         setAvatarUrl(profile?.avatar_url ?? null);
         if (profile?.full_name) setUserName(profile.full_name);
@@ -90,7 +90,7 @@ export default function Navbar() {
       }
     }
     void loadUser();
-    const { data: listener } = supabase.auth.onAuthStateChange(() => void loadUser());
+    const { data: listener } = localAuth.auth.onAuthStateChange(() => void loadUser());
     return () => { mounted = false; listener.subscription.unsubscribe(); };
   }, [language, t]);
 
@@ -108,7 +108,7 @@ export default function Navbar() {
   }, []);
 
   async function logout() {
-    await supabase.auth.signOut();
+    await localAuth.auth.signOut();
     setProfileOpen(false);
     setMenuOpen(false);
     setUserName("");

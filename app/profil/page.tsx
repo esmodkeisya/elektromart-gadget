@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 import { api, PROVINCES, type OrderItemRecord, type OrderRecord, type ReviewMedia, type ShippingAddress } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 
@@ -278,7 +278,7 @@ export default function BuyerProfilPage() {
 
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80);
         const uploadPath = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
-        const { data, error: uploadError } = await supabase.storage
+        const { data, error: uploadError } = await localAuth.storage
           .from("reviews")
           .upload(uploadPath, file, { contentType: file.type });
 
@@ -332,7 +332,7 @@ export default function BuyerProfilPage() {
   useEffect(() => {
     let mounted = true;
     async function loadProfile() {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const { data: userData, error: userError } = await localAuth.auth.getUser();
       if (userError || !userData.user) {
         setError(t("profile.sessionNotFoundLogin"));
         setLoading(false);
@@ -340,7 +340,7 @@ export default function BuyerProfilPage() {
       }
       setEmail(userData.user.email ?? "");
       setUsername(userData.user.email?.split("@")[0] ?? "");
-      const { data, error: profileError } = await supabase
+      const { data, error: profileError } = await localAuth
         .from("profiles")
         .select("full_name, phone, avatar_url, role, username, date_of_birth, gender")
         .eq("id", userData.user.id)
@@ -393,7 +393,7 @@ export default function BuyerProfilPage() {
         }),
       });
       if (email.trim()) {
-        const { error: emailError } = await supabase.auth.updateUser({ email: email.trim() });
+        const { error: emailError } = await localAuth.auth.updateUser({ email: email.trim() });
         if (emailError) throw emailError;
       }
       setMessage(t("admin.profileSaved"));
@@ -411,13 +411,13 @@ export default function BuyerProfilPage() {
       return;
     }
 
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData } = await localAuth.auth.getUser();
     if (!userData.user) return;
     setUploading(true);
     setError("");
     const extension = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     const path = `${userData.user.id}/avatar-${Date.now()}.${extension}`;
-    const { error: uploadError } = await supabase.storage.from("avatars").upload(path, file, {
+    const { error: uploadError } = await localAuth.storage.from("avatars").upload(path, file, {
       upsert: true,
       contentType: file.type,
       cacheControl: "3600",
@@ -428,7 +428,7 @@ export default function BuyerProfilPage() {
       return;
     }
 
-    const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+    const { data } = localAuth.storage.from("avatars").getPublicUrl(path);
     try {
       await api("/api/profile", { method: "PATCH", body: JSON.stringify({ avatar_url: data.publicUrl }) });
       setProfile((current) => ({ ...current, avatar_url: data.publicUrl }));
@@ -441,7 +441,7 @@ export default function BuyerProfilPage() {
   }
 
   async function removePhoto() {
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData } = await localAuth.auth.getUser();
     if (!userData.user) return;
     setUploading(true);
     try {
@@ -460,7 +460,7 @@ export default function BuyerProfilPage() {
       setError(t("admin.passwordTooShort"));
       return;
     }
-    const { error: passwordError } = await supabase.auth.updateUser({ password });
+    const { error: passwordError } = await localAuth.auth.updateUser({ password });
     if (passwordError) setError(passwordError.message);
     else {
       setPassword("");

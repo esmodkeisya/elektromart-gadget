@@ -13,7 +13,6 @@
     "verify:payment": "node scripts/verify-payment-policy.cjs",
     "verify:policy": "node scripts/verify-report-policy.cjs",
     "verify:all": "npm run verify:finance && npm run verify:payment && npm run verify:policy",
-    "export:supabase": "node scripts/export-supabase.js",
     "import:mysql": "node scripts/import-mysql.js",
     "seed": "node scripts/import-mysql.js",
     "seed:reviews": "node scripts/seed-reviews.js",

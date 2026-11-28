@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 
 export default function SellerAvatar({ className = "h-9 w-9" }: { className?: string }) {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    void supabase.auth.getUser().then(async ({ data }) => {
+    void localAuth.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
-      const { data: profile } = await supabase
+      const { data: profile } = await localAuth
         .from("profiles")
         .select("avatar_url")
         .eq("id", data.user.id)

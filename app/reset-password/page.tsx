@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 import { useLanguage } from "@/lib/i18n";
 
 export default function ResetPasswordPage() {
@@ -41,7 +41,7 @@ export default function ResetPasswordPage() {
     }
 
     setIsSubmitting(true);
-    const { error: updateError } = await supabase.auth.resetPassword({ email: email.trim(), password });
+    const { error: updateError } = await localAuth.auth.resetPassword({ email: email.trim(), password });
     setIsSubmitting(false);
 
     if (updateError) {

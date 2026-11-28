@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 import type { PackingType, ShippingBreakdown } from "@/lib/shipping";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -12,7 +12,7 @@ export class ApiError extends Error {
 }
 
 async function fetchApi<T>(path: string, options: RequestInit, retries: number): Promise<T> {
-  const { data } = await supabase.auth.getSession();
+  const { data } = await localAuth.auth.getSession();
   const token = data.session?.access_token;
   const headers = new Headers(options.headers);
   if (!headers.has("Content-Type") && options.body) headers.set("Content-Type", "application/json");

@@ -1,4 +1,4 @@
-// Prisma schema untuk ElektroMart (menggantikan Supabase).
+// Prisma schema untuk ElektroMart (MySQL/MariaDB).
 // Database: MySQL / MariaDB (phpMyAdmin). Lihat DATABASE_URL di .env.
 
 generator client {
@@ -16,7 +16,7 @@ enum UserRole {
   admin
 }
 
-// Menggantikan tabel auth.users milik Supabase.
+// Tabel pengguna lokal dengan autentikasi JWT + bcrypt.
 model User {
   id            String   @id @db.Char(36)
   email         String   @unique @db.VarChar(255)

@@ -3,7 +3,7 @@
 import React, { useState, ChangeEvent, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 import { useLanguage } from "@/lib/i18n";
 import AuthLayout, { AuthField } from "@/components/auth/AuthLayout";
 
@@ -38,7 +38,7 @@ export default function LoginPage() {
     }
 
     setIsSubmitting(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await localAuth.auth.resetPasswordForEmail(email, {
       redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || window.location.origin}/reset-password`,
     });
     setIsSubmitting(false);
@@ -66,7 +66,7 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
     const identifier = form.identitas.trim();
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await localAuth.auth.signInWithPassword({
       ...(identifier.includes("@") ? { email: identifier } : { phone: identifier }),
       password: form.password,
     });
@@ -77,7 +77,7 @@ export default function LoginPage() {
       return;
     }
 
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile, error: profileError } = await localAuth
       .from("profiles")
       .select("role")
       .eq("id", data.user.id)
@@ -94,7 +94,7 @@ export default function LoginPage() {
 
     if (!profile) {
       const metadata = data.user.user_metadata ?? {};
-      const { error: createProfileError } = await supabase.from("profiles").insert({
+      const { error: createProfileError } = await localAuth.from("profiles").insert({
         id: data.user.id,
         role,
         full_name: metadata.full_name ?? null,

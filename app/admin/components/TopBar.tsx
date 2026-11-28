@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Settings } from "lucide-react";
 import AdminAvatar from "./AdminAvatar";
 import AdminNotificationBell from "./AdminNotificationBell";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 import { useLanguage } from "@/lib/i18n";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 
@@ -20,9 +20,9 @@ export default function TopBar({ breadcrumb }: TopBarProps) {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    void supabase.auth.getUser().then(({ data }) => {
+    void localAuth.auth.getUser().then(({ data }) => {
       if (!data.user) return;
-      void supabase.from("profiles").select("avatar_url").eq("id", data.user.id).maybeSingle().then(({ data: profile }) => {
+      void localAuth.from("profiles").select("avatar_url").eq("id", data.user.id).maybeSingle().then(({ data: profile }) => {
         setAvatarUrl(profile?.avatar_url ?? null);
       });
     });

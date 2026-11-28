@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Flag, X, CheckCircle2, Loader2 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 import { api } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 
@@ -39,7 +39,7 @@ export default function ReportModal({
 
   useEffect(() => {
     let mounted = true;
-    void supabase.auth.getSession().then(({ data }) => {
+    void localAuth.auth.getSession().then(({ data }) => {
       if (mounted) setLoggedIn(Boolean(data.session));
     });
     return () => {

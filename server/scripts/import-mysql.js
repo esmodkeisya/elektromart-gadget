@@ -1,9 +1,9 @@
 /*
- * Import server/prisma/supabase-export.json ke MySQL (db_elektromart) via Prisma.
+ * Import data seed lokal (server/prisma/supabase-export.json) ke MySQL via Prisma.
  * Jalankan dari folder server:  npm run import:mysql
  * Idempotent: tabel dibersihkan dulu lalu diisi ulang.
  *
- * Catatan password: hash password Supabase tidak bisa diekspor, jadi semua user
+ * Catatan password: hash password dari sumber lama tidak bisa dipakai, jadi semua user
  * yang dimigrasi diberi password default di bawah ini (harap diganti setelah login).
  */
 
@@ -36,7 +36,7 @@ const toJson = (value) => (value === undefined ? null : value);
 async function main() {
   const file = path.resolve(__dirname, "../prisma/supabase-export.json");
   if (!fs.existsSync(file)) {
-    console.error(`File export tidak ditemukan: ${file}\nJalankan dulu: npm run export:supabase`);
+    console.error(`File seed tidak ditemukan: ${file}\nLetakkan berkas seed lokal di server/prisma/supabase-export.json`);
     process.exit(1);
   }
   const data = JSON.parse(fs.readFileSync(file, "utf8"));

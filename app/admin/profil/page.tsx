@@ -5,7 +5,7 @@ import { Camera, Lock, Mail, Phone, Save, Trash2, User } from "lucide-react";
 import AdminAvatar from "../components/AdminAvatar";
 import TopBar from "../components/TopBar";
 import { useLanguage } from "@/lib/i18n";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 
 type Profile = { full_name: string; phone: string; job_title: string; avatar_url: string | null };
 const emptyProfile: Profile = { full_name: "", phone: "", job_title: "Administrator", avatar_url: null };
@@ -23,7 +23,7 @@ export default function AdminProfil() {
 
   useEffect(() => {
     async function loadProfile() {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const { data: userData, error: userError } = await localAuth.auth.getUser();
       if (userError || !userData.user) {
         setError(t("admin.sessionNotFoundLogin"));
         setLoading(false);
@@ -31,7 +31,7 @@ export default function AdminProfil() {
       }
 
       setEmail(userData.user.email ?? "");
-      const { data, error: profileError } = await supabase
+      const { data, error: profileError } = await localAuth
         .from("profiles")
         .select("full_name, phone, job_title, avatar_url")
         .eq("id", userData.user.id)
@@ -53,14 +53,14 @@ export default function AdminProfil() {
     setSaving(true);
     setMessage("");
     setError("");
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData } = await localAuth.auth.getUser();
     if (!userData.user) {
       setError(t("admin.sessionNotFound"));
       setSaving(false);
       return;
     }
 
-    const { error: saveError } = await supabase.from("profiles").upsert({
+    const { error: saveError } = await localAuth.from("profiles").upsert({
       id: userData.user.id,
       full_name: profile.full_name.trim(),
       phone: profile.phone.trim(),
@@ -69,7 +69,7 @@ export default function AdminProfil() {
       updated_at: new Date().toISOString(),
     });
     const { error: emailError } = email.trim()
-      ? await supabase.auth.updateUser({ email: email.trim() })
+      ? await localAuth.auth.updateUser({ email: email.trim() })
       : { error: null };
     setSaving(false);
     if (saveError || emailError) setError((saveError ?? emailError)?.message ?? t("admin.profileSaveFailed"));
@@ -84,13 +84,13 @@ export default function AdminProfil() {
       return;
     }
 
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData } = await localAuth.auth.getUser();
     if (!userData.user) return;
     setUploading(true);
     setError("");
     const extension = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     const path = `${userData.user.id}/avatar-${Date.now()}.${extension}`;
-    const { error: uploadError } = await supabase.storage.from("avatars").upload(path, file, {
+    const { error: uploadError } = await localAuth.storage.from("avatars").upload(path, file, {
       upsert: true,
       contentType: file.type,
       cacheControl: "3600",
@@ -103,8 +103,8 @@ export default function AdminProfil() {
       return;
     }
 
-    const { data } = supabase.storage.from("avatars").getPublicUrl(path);
-    const { error: saveError } = await supabase.from("profiles").upsert({ id: userData.user.id, avatar_url: data.publicUrl });
+    const { data } = localAuth.storage.from("avatars").getPublicUrl(path);
+    const { error: saveError } = await localAuth.from("profiles").upsert({ id: userData.user.id, avatar_url: data.publicUrl });
     setUploading(false);
     if (saveError) setError(saveError.message);
     else {
@@ -115,10 +115,10 @@ export default function AdminProfil() {
   }
 
   async function removePhoto() {
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: userData } = await localAuth.auth.getUser();
     if (!userData.user) return;
     setUploading(true);
-    const { error: removeError } = await supabase.from("profiles").update({ avatar_url: null }).eq("id", userData.user.id);
+    const { error: removeError } = await localAuth.from("profiles").update({ avatar_url: null }).eq("id", userData.user.id);
     setUploading(false);
     if (removeError) setError(removeError.message);
     else {
@@ -133,7 +133,7 @@ export default function AdminProfil() {
       setError(t("admin.passwordTooShort"));
       return;
     }
-    const { error: passwordError } = await supabase.auth.updateUser({ password });
+    const { error: passwordError } = await localAuth.auth.updateUser({ password });
     if (passwordError) setError(passwordError.message);
     else {
       setPassword("");

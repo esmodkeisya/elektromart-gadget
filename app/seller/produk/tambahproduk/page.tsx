@@ -6,7 +6,7 @@ import { ImagePlus, Plus, RefreshCw, X } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import { api, type CategoryRecord, type ProductRecord } from "@/lib/api";
 import { refreshLiveProducts } from "@/hooks/useLiveProducts";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 
 const EXTRA_SLOTS = 3;
 
@@ -73,20 +73,20 @@ export default function AddProduct() {
     if (file.size > 5 * 1024 * 1024) {
       throw new Error("Ukuran gambar maksimal 5MB.");
     }
-    const { data: sessionData } = await supabase.auth.getSession();
+    const { data: sessionData } = await localAuth.auth.getSession();
     const userId = sessionData.session?.user.id;
     if (!userId) {
       throw new Error("Sesi login tidak ditemukan. Silakan login ulang.");
     }
     const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
     const path = `${userId}/product-${Date.now()}-${safeName}`;
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await localAuth.storage
       .from("products")
       .upload(path, file, { upsert: true, contentType: file.type });
     if (uploadError) {
       throw new Error(`${t("seller.imageUploadFailed")} (${uploadError.message})`);
     }
-    const { data } = supabase.storage.from("products").getPublicUrl(path);
+    const { data } = localAuth.storage.from("products").getPublicUrl(path);
     return data.publicUrl;
   }
 

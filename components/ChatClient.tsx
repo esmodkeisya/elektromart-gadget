@@ -13,7 +13,7 @@ import {
   Store as StoreIcon,
   X,
 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 import { api } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 
@@ -102,7 +102,7 @@ export default function ChatClient() {
   useEffect(() => {
     let mounted = true;
     async function bootstrap() {
-      const { data: userData } = await supabase.auth.getUser();
+      const { data: userData } = await localAuth.auth.getUser();
       if (!mounted) return;
       if (!userData.user) {
         setError(t("profile.sessionNotFoundLogin"));
@@ -223,7 +223,7 @@ export default function ChatClient() {
       setError(t("chat.fileType"));
       return;
     }
-    const { data: sessionData } = await supabase.auth.getSession();
+    const { data: sessionData } = await localAuth.auth.getSession();
     const userId = sessionData.session?.user.id;
     if (!userId) {
       setError(t("profile.sessionNotFoundLogin"));
@@ -234,11 +234,11 @@ export default function ChatClient() {
     try {
       const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
       const path = `${userId}/chat-${Date.now()}-${safeName}`;
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadError } = await localAuth.storage
         .from("chat-files")
         .upload(path, file, { upsert: true, contentType: file.type });
       if (uploadError) throw new Error(`${t("chat.attachError")} (${uploadError.message})`);
-      const { data } = supabase.storage.from("chat-files").getPublicUrl(path);
+      const { data } = localAuth.storage.from("chat-files").getPublicUrl(path);
       await api(`/api/conversations/${selectedId}/messages`, {
         method: "POST",
         body: JSON.stringify({

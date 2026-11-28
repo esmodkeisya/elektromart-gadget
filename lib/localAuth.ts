@@ -1,7 +1,6 @@
 /*
- * Adapter lokal pengganti Supabase (auth + storage + tabel profiles).
- * Meniru subset API supabase-js yang dipakai aplikasi sehingga import
- * `import { supabase } from "@/lib/supabase"` tetap berfungsi.
+ * Adapter autentikasi, profil, dan upload lokal.
+ * Menyediakan API yang dipakai komponen frontend (auth, storage, profiles).
  * Backend: Express lokal (server/), auth JWT + bcrypt, file di /uploads.
  */
 
@@ -342,7 +341,7 @@ class ProfileQuery {
   }
 }
 
-export const supabase = {
+export const localAuth = {
   auth,
   storage,
   from(table: string) {

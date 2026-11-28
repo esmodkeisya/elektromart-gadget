@@ -8,7 +8,7 @@ import Footer from "./Footer";
 import { FlashSaleCard } from "@/components/produk/ProductCard";
 import { flashRecordToProduct, useFlashSale } from "@/hooks/useFlashSale";
 import { useLanguage } from "@/lib/i18n";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 
 export default function FlashSalePageClient() {
   const { t } = useLanguage();
@@ -18,11 +18,11 @@ export default function FlashSalePageClient() {
   useEffect(() => {
     let active = true;
     const syncUser = () =>
-      supabase.auth.getUser().then(({ data }) => {
+      localAuth.auth.getUser().then(({ data }) => {
         if (active) setIsLoggedIn(Boolean(data.user));
       });
     void syncUser();
-    const { data: listener } = supabase.auth.onAuthStateChange(() => void syncUser());
+    const { data: listener } = localAuth.auth.onAuthStateChange(() => void syncUser());
     return () => {
       active = false;
       listener.subscription.unsubscribe();

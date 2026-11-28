@@ -22,7 +22,8 @@ elektromart/
 │   ├── PromoBanners.tsx
 │   └── Footer.tsx
 ├── lib/
-│   └── data.ts          # MOCK DATA produk, kategori, brand, dll
+│   ├── data.ts          # MOCK DATA produk, kategori, brand, dll
+│   └── localAuth.ts     # adapter auth/profil/upload ke API lokal
 ├── tailwind.config.js
 └── package.json
 ```
@@ -36,20 +37,31 @@ npm run dev
 
 Buka http://localhost:3000
 
-## Menghubungkan ke Backend (Node.js + Supabase)
+## Menghubungkan ke Backend (Node.js + Prisma/MySQL)
 
-Backend Express ada di folder `server/` dan menulis ke tabel Supabase (`profiles`, `shipping_addresses`, `categories`, `products`).
+Backend Express ada di folder `server/` dan menyimpan data ke MySQL melalui Prisma (`users`, `profiles`, `shipping_addresses`, `categories`, `products`, dll).
 
-1. Salin `.env.example` menjadi `.env`, lalu isi URL/anon key Supabase.
-2. Tambahkan `SUPABASE_SERVICE_ROLE_KEY` (dari Project Settings > API) untuk backend.
-3. Jalankan blok tambahan di `supabase.sql` pada SQL Editor Supabase.
-4. Install dan jalankan API:
+1. Pastikan MySQL berjalan dan database `db_elektromart` tersedia.
+2. Buat `.env` di root dengan konfigurasi lokal, misalnya:
 
-```bash
-npm install --prefix server
-npm run dev:api
+```env
+DATABASE_URL="mysql://root:@localhost:3306/db_elektromart"
+JWT_SECRET="rahasia-untuk-development"
+NEXT_PUBLIC_API_URL=http://localhost:4000
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+CLIENT_ORIGIN=http://localhost:3000
 ```
 
-5. Frontend: `npm run dev` (http://localhost:3000) memanggil `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`).
+3. Install dependensi dan siapkan Prisma:
+
+```bash
+npm install
+npm install --prefix server
+npm run generate --prefix server
+npm run dbpush --prefix server
+```
+
+4. Opsional: isi data contoh dengan `npm run seed --prefix server` (membaca berkas seed lokal `server/prisma/supabase-export.json`).
+5. Jalankan aplikasi dengan `npm run dev` — menjalankan frontend (http://localhost:3000) dan API (http://localhost:4000) sekaligus. Frontend memanggil API melalui `NEXT_PUBLIC_API_URL`.
 
 CRUD admin: kategori, seller, buyer. CRUD seller: produk. Profil buyer menyimpan data pribadi + alamat pengiriman ke database.

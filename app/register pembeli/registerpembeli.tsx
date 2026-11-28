@@ -3,7 +3,7 @@
 import React, { useState, ChangeEvent, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { User, Mail, Phone, Lock, KeyRound, Eye, EyeOff, UserPlus } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { localAuth } from "@/lib/localAuth";
 import { useLanguage } from "@/lib/i18n";
 import AuthLayout, { AuthField, RoleToggle } from "@/components/auth/AuthLayout";
 
@@ -55,7 +55,7 @@ export default function RegisterPembeliPage() {
     }
 
     setIsSubmitting(true);
-    const { error } = await supabase.auth.signUp({
+    const { error } = await localAuth.auth.signUp({
       email: form.email.trim(),
       password: form.password,
       options: {
@@ -69,10 +69,7 @@ export default function RegisterPembeliPage() {
 
     setIsSubmitting(false);
     if (error) {
-      const message = error.message.toLowerCase().includes("confirmation email")
-        ? t("auth.supabaseConfirmEmailError")
-        : error.message;
-      alert(`${t("auth.registerFailed")}${message}`);
+      alert(`${t("auth.registerFailed")}${error.message}`);
       return;
     }
 

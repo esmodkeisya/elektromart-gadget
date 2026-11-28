@@ -775,7 +775,7 @@ async function backfillOrderItemSellers() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Upload (pengganti Supabase Storage)                                 */
+/* Upload file ke server/uploads                                       */
 /* ------------------------------------------------------------------ */
 
 const uploadRoot = path.resolve(__dirname, "../uploads");
@@ -807,7 +807,7 @@ app.post("/api/upload", requireUser, upload.single("file"), (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Auth lokal (pengganti Supabase Auth)                                */
+/* Auth lokal (JWT + bcrypt)                                           */
 /* ------------------------------------------------------------------ */
 
 app.post("/api/auth/register", async (req, res) => {
@@ -912,7 +912,7 @@ app.post("/api/auth/reset-password", async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Profiles (dipakai shim supabase.from("profiles"))                   */
+/* Profiles (dipakai adapter lokal)                                    */
 /* ------------------------------------------------------------------ */
 
 app.get("/api/profiles", optionalUser, async (req, res) => {
